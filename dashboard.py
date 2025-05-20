@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+import streamlit as st
+import pandas as pd
+import json
+import plotly.express as px
+import plotly.graph_objects as go
+import numpy as np
+import os
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+
+def load_data(file_path: str) -> Dict:
+    """Load JSON data from file"""
+    try:
+        with open(file_path, 'r') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        st.error(f"Error loading file: {str(e)}")
+        return {}
+
+def create_entries_dataframe(data: Dict) -> pd.DataFrame:
+    """Create a DataFrame from log entries"""
+    # Handle different data formats
+    entries = []
+    
+    if "entries" in data:
+        # Detailed or raw format
+        entries = data.get("entries", [])
+    elif isinstance(data, dict) and "total_entries" in data:
+        # Summary format - no entries to display
+        st.info("This is a summary file. It contains statistics but no detailed entries.")
+        return pd.DataFrame()
+    elif isinstance(data, list):
+        # Direct list of entries
+        entries = data
+    
+    if not entries:
+        return pd.DataFrame()
+    
+    # Convert entries to DataFrame
+    df = pd.DataFrame(entries)
+    
+    # Ensure required columns exist
+    for col in ["host", "status", "duration"]:
+        if col not in df.columns:
+            df[col] = None
+    
+    # If duration is present, add duration categories
+    if "duration" in df.columns:
+        df["duration_ms"] = pd.to_numeric(df["duration"], errors="coerce")
+        # Create duration categories
+        bins = [0, 100, 500, 1000, 5000, float('inf')]
+        labels = ['<100ms', '100-500ms', '500ms-1s', '1s-5s', '>5s']
+        df["duration_category"] = pd.cut(df["duration_ms"], bins=bins, labels=labels)
+    
+    return df
+
+def plot_status_codes(df: pd.DataFrame) -> None:
+    """Plot status code distribution"""
+    if df.empty or "status" not in df.columns:
+        st.warning("No status code data available")
+        return
+    
+    # Filter out None/NaN values
+    filtered_df = df[df["status"].notna()]
+    if filtered_df.empty:
+        st.warning("No valid status codes found")
+        return
+    
+    # Convert status to string if it's not already
+    filtered_df["status"] = filtered_df["status"].astype(str)
+    
+    # Count status codes
+    status_counts = filtered_df["status"].value_counts().reset_index()
+    status_counts.columns = ["Status Code", "Count"]
+    
+    # Create color map
+    def get_status_color(status_str):
+        if pd.isna(status_str) or not status_str.isdigit():
+            return "gray"
+        status = int(status_str)
+        if 200 <= status < 300:
+            return "green"
+        elif 300 <= status < 400:
+            return "blue"
+        elif 400 <= status < 500:
+            return "orange"
+        elif 500 <= status < 600:
+            return "red"
+        else:
+            return "gray"
+    
+    status_counts["Color"] = status_counts["Status Code"].apply(get_status_color)
+    
+    # Create bar chart
+    fig = px.bar(
+        status_counts, 
+        x="Status Code", 
+        y="Count",
+        color="Color",
+        color_discrete_map="identity",
+        title="Status Code Distribution"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_duration_distribution(df: pd.DataFrame) -> None:
+    """Plot request duration distribution"""
+    if df.empty or "duration_ms" not in df.columns:
+        st.warning("No duration data available")
+        return
+    
+    # Filter out None/NaN values
+    filtered_df = df[df["duration_ms"].notna()]
+    if filtered_df.empty:
+        st.warning("No valid duration data found")
+        return
+    
+    # Plot histogram of durations
+    fig = px.histogram(
+        filtered_df, 
+        x="duration_ms",
+        nbins=50,
+        title="Request Duration Distribution (ms)",
+        labels={"duration_ms": "Duration (ms)"}
+    )
+    fig.update_layout(showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Plot duration categories
+    if "duration_category" in filtered_df.columns:
+        cat_counts = filtered_df["duration_category"].value_counts().reset_index()
+        cat_counts.columns = ["Duration", "Count"]
+        cat_counts = cat_counts.sort_values("Duration")
+        
+        fig = px.bar(
+            cat_counts,
+            x="Duration",
+            y="Count",
+            title="Request Duration Categories"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+def plot_top_hosts(df: pd.DataFrame, top_n: int = 10) -> None:
+    """Plot top hosts by request count"""
+    if df.empty or "host" not in df.columns:
+        st.warning("No host data available")
+        return
+    
+    # Filter out None/NaN values
+    filtered_df = df[df["host"].notna()]
+    if filtered_df.empty:
+        st.warning("No valid host data found")
+        return
+    
+    # Count hosts
+    host_counts = filtered_df["host"].value_counts().reset_index()
+    host_counts.columns = ["Host", "Count"]
+    
+    # Get top N hosts
+    top_hosts = host_counts.head(top_n)
+    
+    # Create horizontal bar chart
+    fig = px.bar(
+        top_hosts, 
+        y="Host", 
+        x="Count",
+        orientation="h",
+        title=f"Top {top_n} Hosts by Request Count"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_host_status_heatmap(df: pd.DataFrame, top_n: int = 10) -> None:
+    """Plot heatmap of hosts vs status codes"""
+    if df.empty or "host" not in df.columns or "status" not in df.columns:
+        st.warning("No host or status data available")
+        return
+    
+    # Filter out None/NaN values for both host and status
+    filtered_df = df[df["host"].notna() & df["status"].notna()]
+    if filtered_df.empty:
+        st.warning("No valid host and status data found")
+        return
+    
+    # Convert status to string if it's not already
+    filtered_df["status"] = filtered_df["status"].astype(str)
+    
+    # Get top hosts
+    top_hosts = filtered_df["host"].value_counts().head(top_n).index.tolist()
+    if not top_hosts:
+        st.warning("No host data available for heatmap")
+        return
+    
+    # Filter for top hosts
+    filtered_df = filtered_df[filtered_df["host"].isin(top_hosts)]
+    
+    try:
+        # Create crosstab of hosts vs status codes
+        crosstab = pd.crosstab(filtered_df["host"], filtered_df["status"])
+        
+        # Create heatmap
+        fig = px.imshow(
+            crosstab,
+            labels=dict(x="Status Code", y="Host", color="Count"),
+            title=f"Status Codes by Top {top_n} Hosts",
+            aspect="auto"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Error creating host-status heatmap: {str(e)}")
+
+def main():
+    try:
+        st.set_page_config(
+            page_title="Charles Log Viewer",
+            page_icon="🌐",
+            layout="wide"
+        )
+        
+        st.title("Charles Proxy Log Analyzer Dashboard")
+        
+        # Output directory selection
+        output_dir = st.sidebar.text_input("Output Directory", value="./output")
+        
+        # File selector
+        try:
+            json_files = [f for f in os.listdir(output_dir) if f.endswith('.json')]
+        except FileNotFoundError:
+            st.error(f"Directory '{output_dir}' not found")
+            st.info("Please enter a valid directory path or create the directory")
+            if output_dir == "./output":
+                st.info("You can create the default directory with: `mkdir -p ./output`")
+            return
+            
+        if not json_files:
+            st.error(f"No JSON files found in '{output_dir}'")
+            st.info("Please run the parser first to generate JSON files, e.g.:\n\n```\npython client.py /path/to/your-file.chlsj --format detailed --save --output-dir={output_dir}\n```")
+            return
+        
+        selected_file = st.selectbox("Select a parsed Charles log file:", json_files)
+        full_path = os.path.join(output_dir, selected_file)
+        
+        # Load data
+        data = load_data(full_path)
+        if not data:
+            return
+        
+        # Create DataFrame
+        df = create_entries_dataframe(data)
+        
+        # Display summary info
+        st.header("Log Summary")
+        
+        if "entries" in data:
+            col1, col2 = st.columns(2)
+            with col1:
+                total_entries = len(data.get("entries", []))
+                st.metric("Total Entries", total_entries)
+        elif "total_entries" in data:
+            # Summary format
+            st.metric("Total Entries", data.get("total_entries", 0))
+            
+            # Display summary stats
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if "request_methods" in data:
+                    st.subheader("Request Methods")
+                    methods_df = pd.DataFrame(
+                        {"Method": list(data["request_methods"].keys()), 
+                        "Count": list(data["request_methods"].values())}
+                    )
+                    st.dataframe(methods_df, use_container_width=True)
+                
+                if "hosts" in data:
+                    st.subheader("Top Hosts")
+                    hosts_df = pd.DataFrame(
+                        {"Host": list(data["hosts"].keys()), 
+                        "Count": list(data["hosts"].values())}
+                    ).sort_values("Count", ascending=False).head(10)
+                    st.dataframe(hosts_df, use_container_width=True)
+            
+            with col2:
+                if "status_codes" in data:
+                    st.subheader("Status Codes")
+                    status_df = pd.DataFrame(
+                        {"Status": list(data["status_codes"].keys()), 
+                        "Count": list(data["status_codes"].values())}
+                    )
+                    st.dataframe(status_df, use_container_width=True)
+                
+                if "timing" in data:
+                    st.subheader("Timing (ms)")
+                    timing = data["timing"]
+                    st.metric("Min", timing.get("min", 0))
+                    st.metric("Max", timing.get("max", 0))
+                    st.metric("Average", timing.get("avg", 0))
+            
+            # No detailed data to display
+            return
+        
+        if df.empty:
+            st.warning("No entries found in the log file or unsupported format")
+            return
+        
+        # Add filters
+        st.header("Filters")
+        
+        # Get unique non-null values
+        hosts = df["host"].dropna().unique().tolist()
+        statuses = df["status"].dropna().unique().tolist()
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Host filter
+            hosts = ["All"] + sorted(hosts)
+            selected_host = st.selectbox("Host:", hosts)
+        
+        with col2:
+            # Status code filter
+            statuses = ["All"] + sorted([str(s) for s in statuses if pd.notna(s)])
+            selected_status = st.selectbox("Status Code:", statuses)
+        
+        with col3:
+            # Duration filter
+            if "duration_category" in df.columns:
+                durations = ["All"] + sorted(df["duration_category"].dropna().unique().tolist())
+                selected_duration = st.selectbox("Duration:", durations)
+            else:
+                selected_duration = "All"
+                st.text("No duration data available")
+        
+        # Apply filters
+        filtered_df = df.copy()
+        
+        if selected_host != "All":
+            filtered_df = filtered_df[filtered_df["host"] == selected_host]
+        
+        if selected_status != "All":
+            filtered_df = filtered_df[filtered_df["status"].astype(str) == selected_status]
+        
+        if selected_duration != "All" and "duration_category" in filtered_df.columns:
+            filtered_df = filtered_df[filtered_df["duration_category"] == selected_duration]
+        
+        # Display filter summary
+        st.metric("Filtered Entries", len(filtered_df))
+        
+        # Visualizations
+        st.header("Visualizations")
+        
+        # Status code distribution
+        plot_status_codes(filtered_df)
+        
+        # Top hosts
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            plot_top_hosts(filtered_df)
+        
+        with col2:
+            plot_host_status_heatmap(filtered_df)
+        
+        # Duration distribution
+        plot_duration_distribution(filtered_df)
+        
+        # Data table
+        st.header("Data Explorer")
+        
+        # Drop duration calculation columns for display
+        display_df = filtered_df.drop(columns=["duration_ms", "duration_category"], errors="ignore")
+        
+        # Display the data
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            height=400
+        )
+    except Exception as e:
+        st.error(f"An unexpected error occurred: {str(e)}")
+        st.info("If this is a dependency issue, make sure you've installed all required packages with: `pip install -r dashboard_requirements.txt`")
+
+if __name__ == "__main__":
+    main() 

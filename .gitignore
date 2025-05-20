@@ -1,0 +1,30 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Output directory
+output/
+
+# Python bytecode files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Local development settings
+.env
+.venv
+
+# macOS specific files
+.DS_Store
+
+# Log files
+*.log 
