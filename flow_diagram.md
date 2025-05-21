@@ -2,73 +2,39 @@
 
 ```mermaid
 graph TD
-    %% Main User Interactions
-    User([User]) -->|Provides .chlsj file| ClientPy
-    User -->|Runs| DashboardTool
-    User -->|Views| HTMLDashboard
-    User -->|Runs| StreamlitDashboard
+    %% Main components and flows
+    User([User]) -->|Provides .chlsj file| Parser
+    User -->|Views| Dashboard
     
-    %% Main Components
-    subgraph "Charles Log Parser Core"
-        ClientPy[client.py] -->|Invokes| ServerPy
-        ServerPy[server.py] -->|Contains| ParseLogTool[parse_charles_log tool]
-        ServerPy -->|Contains| ParseSaveLogTool[parse_and_save_charles_log tool]
-        ServerPy -->|Contains| LargeFileTool[read_large_file_part tool] 
-        ServerPy -->|Contains| DashboardTool[view_charles_log_dashboard tool]
+    %% Core components
+    subgraph "Core Components"
+        Parser[Parser Tools] -->|Process data| LogData[Parsed Data]
+        LogData -->|Generate| Dashboard[Visualization]
     end
     
-    %% Input Files
-    CHLSJFile[(.chlsj file)] -->|Input| ParseLogTool
-    CHLSJFile -->|Input| ParseSaveLogTool
-    CHLSJFile -->|Input chunk by chunk| LargeFileTool
+    %% Parser tools
+    Parser -->|Basic parse| Basic[parse_charles_log]
+    Parser -->|Save results| Save[parse_and_save_charles_log]
+    Parser -->|Large files| Large[read_large_file_part]
+    Parser -->|Filter by host| Filter[parse_by_host]
     
-    %% Processing Flow
-    ParseLogTool -->|Processes| LogData[Log Data]
-    ParseSaveLogTool -->|Processes & Saves| SavedJSON[Saved JSON]
-    LargeFileTool -->|Processes chunks| LogData
+    %% Output options
+    Dashboard -->|HTML| HTMLView[Browser View]
+    Dashboard -->|Streamlit| StreamView[Interactive View]
     
-    %% Dashboard Components
-    subgraph "Dashboard Components"
-        DashboardTool -->|Generates| HTMLDashboard[HTML Dashboard]
-        SavedJSON -->|Input for| StreamlitDashboard[Streamlit Dashboard]
-        
-        %% Dashboard Files
-        subgraph "HTML Dashboard"
-            HTMLTemplate[templates/dashboard.html]
-            CSSStyles[static/css/dashboard.css]
-            JSCharts[static/js/dashboard.js]
-        end
-        
-        DashboardTool -->|Uses| HTMLTemplate
-        DashboardTool -->|Uses| CSSStyles
-        DashboardTool -->|Uses| JSCharts
-    end
+    %% Output formats
+    LogData -->|Raw| RawJSON[Raw JSON]
+    LogData -->|Summary| SummaryStats[Statistics]
+    LogData -->|Detailed| DetailedView[Detailed Data]
     
-    %% Output Files
-    HTMLDashboard -->|Shows| VisualizedData[Visualized Data]
-    StreamlitDashboard -->|Shows| VisualizedData
-    
-    %% Optional Flow
-    User -->|Run for large files| LargeExample[large_file_example.py]
-    LargeExample -->|Processes| CHLSJFile
-    LargeExample -->|Uses| LargeFileTool
-    User -->|Run for simple visualization| SimpleDashboard[simple_dashboard.py]
-    SavedJSON -->|Input for| SimpleDashboard
-    
-    %% Start Scripts
-    RunScriptSh[run_dashboard.sh] -->|Starts| StreamlitDashboard
-    RunScriptBat[run_dashboard.bat] -->|Starts| StreamlitDashboard
-    
-    %% Legend and Styling
+    %% Styling
     classDef core fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef dashboard fill:#bbf,stroke:#333,stroke-width:1px;
-    classDef file fill:#bfb,stroke:#333,stroke-width:1px;
-    classDef script fill:#ffb,stroke:#333,stroke-width:1px;
+    classDef output fill:#bbf,stroke:#333,stroke-width:1px;
+    classDef tool fill:#bfb,stroke:#333,stroke-width:1px;
     
-    class ServerPy,ParseLogTool,ParseSaveLogTool,LargeFileTool core;
-    class HTMLDashboard,StreamlitDashboard,SimpleDashboard,HTMLTemplate,CSSStyles,JSCharts dashboard;
-    class CHLSJFile,SavedJSON,LogData file;
-    class RunScriptSh,RunScriptBat,LargeExample,ClientPy script;
+    class Parser,LogData core;
+    class Dashboard,HTMLView,StreamView output;
+    class Basic,Save,Large,Filter tool;
 ```
 
 # Simplified Flow Diagram
