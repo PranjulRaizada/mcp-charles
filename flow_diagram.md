@@ -71,6 +71,40 @@ graph TD
     class RunScriptSh,RunScriptBat,LargeExample,ClientPy script;
 ```
 
+# Simplified Flow Diagram
+
+For a simpler understanding of the project workflow:
+
+```mermaid
+graph TD
+    A[Charles Proxy] -->|Export logs as .chlsj| B[Log File]
+    B --> C{Parse Log}
+    C -->|Basic parsing| D[All Entries]
+    C -->|Filter by host| E[Host-specific Entries]
+    
+    D --> F[Generate Output]
+    E --> F
+    
+    F -->|Raw format| G[Raw JSON]
+    F -->|Summary format| H[Summary Statistics]
+    F -->|Detailed format| I[Detailed Entries]
+    
+    G --> J[Save to File/View Dashboard]
+    H --> J
+    I --> J
+    
+    style A fill:#f9d5e5,stroke:#333,stroke-width:2px
+    style B fill:#eeeeee,stroke:#333,stroke-width:2px
+    style C fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style D fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style E fill:#e8f5e9,stroke:#333,stroke-width:2px
+    style F fill:#fff9c4,stroke:#333,stroke-width:2px
+    style G fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style H fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style I fill:#f5f5f5,stroke:#333,stroke-width:2px
+    style J fill:#d1c4e9,stroke:#333,stroke-width:2px
+```
+
 ## Project Components Explanation
 
 ### Core Components
