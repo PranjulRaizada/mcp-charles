@@ -55,6 +55,8 @@ python client.py /path/to/your-file.chlsj [options]
 - `--save` - Save parsed results to a file
 - `--output-dir DIR` - Directory to save results (default: ./output)
 - `--dashboard` - Open an interactive dashboard in your browser to visualize the results
+- `--host HOSTNAME` - Filter logs by hostname
+- `--match-type {exact,contains}` - Type of hostname matching to use (default: exact)
 
 ### Examples:
 
@@ -70,7 +72,33 @@ python client.py /path/to/your-file.chlsj --dashboard
 
 # Parse a file, save the detailed results, and open the dashboard
 python client.py /path/to/your-file.chlsj --format detailed --save --dashboard --output-dir ./output
+
+# Filter logs by exact hostname match (default behavior)
+python client.py /path/to/your-file.chlsj --format detailed --save --host api.example.com
+
+# Filter logs by hostname containing a substring
+python client.py /path/to/your-file.chlsj --format detailed --save --host example.com --match-type contains
+
+# Real-world example: Filter Paytm dashboard logs (exact match)
+python client.py /path/to/your-file.chlsj --format detailed --save --output-dir ./output --host dashboard.paytm.com
+
+# Real-world example: Filter all Paytm related logs (substring match)
+python client.py /path/to/your-file.chlsj --format detailed --save --output-dir ./output --host paytm.com --match-type contains
 ```
+
+### Host Filtering
+
+The host filtering functionality allows you to extract only the entries for specific hosts from your Charles logs:
+
+- **Exact Matching (Default)**: Use `--host hostname` to filter logs by exact hostname match
+- **Substring Matching**: Use `--host hostname --match-type contains` to filter logs by hostnames containing the specified string
+
+This is particularly useful when debugging specific services in logs with many domains. Examples:
+
+1. `--host dashboard.paytm.com` - Returns only exact matches for "dashboard.paytm.com"
+2. `--host paytm.com --match-type contains` - Returns all hosts containing "paytm.com" (like "dashboard.paytm.com", "api.paytm.com", etc.)
+
+The filtered results can be saved and visualized just like normal parsing results.
 
 ## Available Dashboards
 
