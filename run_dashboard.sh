@@ -1,18 +1,22 @@
 #!/bin/bash
 
-# Activate virtual environment if it exists
-if [ -d "venv" ]; then
-    source venv/bin/activate
-else
-    echo "Creating virtual environment..."
-    python -m venv venv
-    source venv/bin/activate
+# This script runs the streamlit dashboard for visualizing Charles logs
+
+# Determine script directory
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+cd "$SCRIPT_DIR"
+
+# Check if virtual environment exists
+if [ ! -d "venv" ]; then
+    echo "Virtual environment not found. Creating one..."
+    ./setup_venv.sh
 fi
 
-# Install dependencies
-echo "Installing dashboard dependencies..."
-pip install -r dashboard_requirements.txt
+# Activate virtual environment
+source venv/bin/activate
 
-# Run the dashboard
-echo "Starting dashboard..."
-streamlit run dashboard.py 
+# Run dashboard
+streamlit run dashboard/dashboard.py
+
+# Deactivate at end
+deactivate 

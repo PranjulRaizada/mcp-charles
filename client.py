@@ -19,6 +19,9 @@ async def main():
     parser.add_argument('--save', action='store_true', help='Save parsed results to file')
     parser.add_argument('--output-dir', default='./output', help='Directory to save results (default: ./output)')
     parser.add_argument('--dashboard', action='store_true', help='Open a dashboard in browser to visualize the results')
+    parser.add_argument('--host', help='Filter by hostname (e.g., "dashboard.paytm.com")')
+    parser.add_argument('--match-type', choices=['exact', 'contains'], default='exact',
+                        help='Type of host matching to use (default: exact)')
     args = parser.parse_args()
     
     # If dashboard is requested, we need to save the results
@@ -46,23 +49,48 @@ async def main():
         print(f"Available tools: {[tool.name for tool in response.tools]}")
         
         # Execute the tool to parse Charles logs
-        if needs_save:
-            result = await session.call_tool(
-                "parse_and_save_charles_log",
-                {
-                    "file_path": args.file_path,
-                    "format_type": args.format,
-                    "output_dir": args.output_dir
-                }
-            )
+        if args.host:
+            # Filter by host
+            if needs_save:
+                result = await session.call_tool(
+                    "parse_and_save_charles_log_by_host",
+                    {
+                        "file_path": args.file_path,
+                        "host": args.host,
+                        "format_type": args.format,
+                        "output_dir": args.output_dir,
+                        "match_type": args.match_type
+                    }
+                )
+            else:
+                result = await session.call_tool(
+                    "parse_charles_log_by_host",
+                    {
+                        "file_path": args.file_path,
+                        "host": args.host,
+                        "format_type": args.format,
+                        "match_type": args.match_type
+                    }
+                )
         else:
-            result = await session.call_tool(
-                "parse_charles_log",
-                {
-                    "file_path": args.file_path,
-                    "format_type": args.format
-                }
-            )
+            # Process all entries
+            if needs_save:
+                result = await session.call_tool(
+                    "parse_and_save_charles_log",
+                    {
+                        "file_path": args.file_path,
+                        "format_type": args.format,
+                        "output_dir": args.output_dir
+                    }
+                )
+            else:
+                result = await session.call_tool(
+                    "parse_charles_log",
+                    {
+                        "file_path": args.file_path,
+                        "format_type": args.format
+                    }
+                )
         
         # Print the result
         print("Results:")
@@ -104,15 +132,27 @@ async def main():
                 print(f"Success: {data['message']}")
                 print(f"Output file: {data['output_file']}")
                 
+                if args.host:
+                    print(f"Filtered by host: {args.host}")
+                    print(f"Match type: {args.match_type}")
+                    print(f"Matching entries: {data.get('entry_count', 0)}")
+                
                 # If user wants to view the dashboard, call the dashboard tool
                 if args.dashboard and data['output_file'] and os.path.exists(data['output_file']):
                     await view_dashboard(session, data['output_file'])
             else:
+                if args.host:
+                    print(f"Filtered by host: {args.host}")
+                    print(f"Match type: {args.match_type}")
+                
                 if args.format == "summary":
                     print(f"Total entries: {data.get('total_entries', 0)}")
                     print(f"Request methods: {data.get('request_methods', {})}")
                     print(f"Status codes: {data.get('status_codes', {})}")
-                    print(f"Top hosts: {dict(list(data.get('hosts', {}).items())[:5])}")
+                    
+                    if not args.host:
+                        print(f"Top hosts: {dict(list(data.get('hosts', {}).items())[:5])}")
+                    
                     timing = data.get('timing', {})
                     print(f"Timing (ms): min={timing.get('min', 0):.2f}, " +
                           f"max={timing.get('max', 0):.2f}, " +

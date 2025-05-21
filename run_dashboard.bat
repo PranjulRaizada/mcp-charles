@@ -1,22 +1,24 @@
 @echo off
-echo Charles Log Dashboard Launcher
+:: This script runs the streamlit dashboard for visualizing Charles logs
 
-REM Check if virtual environment exists
-if exist venv\ (
-    echo Activating virtual environment...
-    call venv\Scripts\activate.bat
-) else (
-    echo Creating virtual environment...
-    python -m venv venv
-    call venv\Scripts\activate.bat
+:: Determine script directory
+pushd %~dp0
+
+:: Check if virtual environment exists
+if not exist venv (
+    echo Virtual environment not found. Creating one...
+    call setup_venv.bat
 )
 
-REM Install dependencies
-echo Installing dashboard dependencies...
-pip install -r dashboard_requirements.txt
+:: Activate virtual environment
+call venv\Scripts\activate.bat
 
-REM Run the dashboard
+:: Run dashboard
 echo Starting dashboard...
-streamlit run dashboard.py
+streamlit run dashboard\dashboard.py
 
-pause 
+:: Deactivate at end
+call deactivate
+
+:: Return to original directory
+popd 

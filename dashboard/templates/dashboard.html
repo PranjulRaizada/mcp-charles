@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Charles Log Analysis</title>
+    <link rel="stylesheet" href="static/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Charles Proxy Log Analysis</h1>
+            <p>Generated on: {{timestamp}}</p>
+            <p>File: {{filename}}</p>
+        </div>
+
+        <div class="info-box">
+            <h2>Summary</h2>
+            <p>Total Entries: {{total_entries}}</p>
+        </div>
+
+        <!-- Charts Row 1 -->
+        <div class="chart-row">
+            <div class="chart-container half-width">
+                <h3>Status Codes</h3>
+                <canvas id="statusCodeChart"></canvas>
+            </div>
+            <div class="chart-container half-width">
+                <h3>Request Methods</h3>
+                <canvas id="requestMethodsChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Charts Row 2 -->
+        <div class="chart-row">
+            <div class="chart-container half-width">
+                <h3>Top Hosts</h3>
+                <canvas id="topHostsChart"></canvas>
+            </div>
+            <div class="chart-container half-width">
+                <h3>Request Duration</h3>
+                <canvas id="timingChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Additional Chart (conditional) -->
+        <div class="chart-row" id="durationDistributionRow" style="display: {{display_duration_distribution}};">
+            <div class="chart-container full-width">
+                <h3>Duration Distribution</h3>
+                <canvas id="durationDistributionChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Data Tables -->
+        <h2>Detailed Data</h2>
+        
+        <!-- Status Codes Table -->
+        <h3>Status Codes</h3>
+        <table>
+            <tr>
+                <th>Status Code</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            {{status_code_rows}}
+        </table>
+        
+        <!-- Request Methods Table -->
+        <h3>Request Methods</h3>
+        <table>
+            <tr>
+                <th>Method</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            {{request_method_rows}}
+        </table>
+        
+        <!-- Top Hosts Table -->
+        <h3>Top Hosts</h3>
+        <table>
+            <tr>
+                <th>Host</th>
+                <th>Count</th>
+                <th>Percentage</th>
+            </tr>
+            {{top_host_rows}}
+        </table>
+        
+        <!-- Timing Table -->
+        <h3>Timing (ms)</h3>
+        <table>
+            <tr>
+                <th>Metric</th>
+                <th>Value</th>
+            </tr>
+            <tr>
+                <td>Minimum</td>
+                <td>{{timing_min}}</td>
+            </tr>
+            <tr>
+                <td>Maximum</td>
+                <td>{{timing_max}}</td>
+            </tr>
+            <tr>
+                <td>Average</td>
+                <td>{{timing_avg}}</td>
+            </tr>
+            <tr>
+                <td>Total</td>
+                <td>{{timing_total}}</td>
+            </tr>
+        </table>
+        
+        <footer>
+            <p>Charles Log Analyzer - Generated on {{timestamp}}</p>
+        </footer>
+    </div>
+
+    <!-- Pass data to JavaScript -->
+    <script>
+        // Data from backend
+        const dashboardData = {{dashboard_data_json}};
+        
+        // Initialize charts when document is ready
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeCharts(dashboardData);
+        });
+    </script>
+    
+    <!-- Load Dashboard JS -->
+    <script src="static/js/dashboard.js"></script>
+</body>
+</html> 

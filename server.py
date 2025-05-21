@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
+import tempfile
+import webbrowser
+import shutil
 from typing import Dict, List, Optional, Union, Literal
 from collections import Counter
 from datetime import datetime
@@ -32,6 +36,41 @@ def parse_charles_log(file_path: str, format_type: str = "summary") -> Dict:
     if file_path.endswith('.chlsj'):
         try:
             return _parse_chlsj_file(file_path, format_type)
+        except Exception as e:
+            return {"error": f"Error parsing .chlsj file: {str(e)}"}
+    
+    # For .chls files (binary format)
+    return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+@mcp.tool()
+def parse_charles_log_by_host(file_path: str, host: str, format_type: str = "detailed", match_type: str = "exact") -> Dict:
+    """
+    Parse a Charles log file (.chls or .chlsj) and extract only entries for a specific host.
+    
+    Args:
+        file_path: Path to the Charles log file
+        host: The hostname to filter by (e.g., "dashboard.paytm.com")
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of hostname matching to use ("exact" or "contains")
+        
+    Returns:
+        A dictionary containing the parsed log data for the specified host
+    """
+    # Validate file path
+    if not os.path.exists(file_path):
+        return {"error": f"File not found: {file_path}"}
+    
+    if not file_path.endswith(('.chls', '.chlsj')):
+        return {"error": "File must be a Charles log file (.chls or .chlsj)"}
+    
+    # Validate match_type
+    if match_type not in ["exact", "contains"]:
+        return {"error": f"Invalid match_type: {match_type}. Must be 'exact' or 'contains'"}
+    
+    # For .chlsj files (JSON format)
+    if file_path.endswith('.chlsj'):
+        try:
+            return _parse_chlsj_file_by_host(file_path, host, format_type, match_type)
         except Exception as e:
             return {"error": f"Error parsing .chlsj file: {str(e)}"}
     
@@ -83,6 +122,69 @@ def parse_and_save_charles_log(file_path: str, output_dir: str = "./output", for
                 "status": "success",
                 "message": f"Successfully parsed and saved to {output_file}",
                 "output_file": output_file
+            }
+        except Exception as e:
+            return {"error": f"Error parsing or saving .chlsj file: {str(e)}"}
+    
+    # For .chls files (binary format)
+    return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+@mcp.tool()
+def parse_and_save_charles_log_by_host(file_path: str, host: str, output_dir: str = "./output", format_type: str = "detailed", match_type: str = "exact") -> Dict:
+    """
+    Parse a Charles log file (.chls or .chlsj) for a specific host and save the result to the specified directory.
+    
+    Args:
+        file_path: Path to the Charles log file
+        host: The hostname to filter by (e.g., "dashboard.paytm.com")
+        output_dir: Directory to save the converted JSON file
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of hostname matching to use ("exact" or "contains")
+        
+    Returns:
+        A dictionary containing the result of the operation
+    """
+    # Validate file path
+    if not os.path.exists(file_path):
+        return {"error": f"File not found: {file_path}"}
+    
+    if not file_path.endswith(('.chls', '.chlsj')):
+        return {"error": "File must be a Charles log file (.chls or .chlsj)"}
+    
+    # Validate match_type
+    if match_type not in ["exact", "contains"]:
+        return {"error": f"Invalid match_type: {match_type}. Must be 'exact' or 'contains'"}
+    
+    # Validate output directory
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except Exception as e:
+            return {"error": f"Error creating output directory: {str(e)}"}
+    
+    # For .chlsj files (JSON format)
+    if file_path.endswith('.chlsj'):
+        try:
+            result = _parse_chlsj_file_by_host(file_path, host, format_type, match_type)
+            
+            # Generate output filename
+            base_name = os.path.basename(file_path)
+            name_without_ext = os.path.splitext(base_name)[0]
+            safe_host = host.replace(".", "_").replace("/", "_").replace(":", "_")
+            match_str = "exact" if match_type == "exact" else "contains"
+            output_file = os.path.join(output_dir, f"{name_without_ext}_{safe_host}_{match_str}_parsed.json")
+            
+            # Write to file
+            with open(output_file, 'w') as f:
+                json.dump(result, f, indent=2)
+            
+            return {
+                "status": "success",
+                "message": f"Successfully parsed and saved to {output_file}",
+                "output_file": output_file,
+                "filtered_by_host": host,
+                "match_type": match_type,
+                "entry_count": len(result.get("entries", [])) if "entries" in result else 0
             }
         except Exception as e:
             return {"error": f"Error parsing or saving .chlsj file: {str(e)}"}
@@ -370,6 +472,198 @@ def _parse_chlsj_file(file_path: str, format_type: str) -> Dict:
         
         return {"entries": processed_entries}
 
+def _parse_chlsj_file_by_host(file_path: str, host: str, format_type: str, match_type: str = "exact") -> Dict:
+    """
+    Parse a .chlsj file (Charles log in JSON format) and filter by host
+    
+    Args:
+        file_path: Path to the .chlsj file
+        host: Hostname to filter by
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of hostname matching to use ("exact" or "contains")
+        
+    Returns:
+        Dictionary with parsed data for the specified host
+    """
+    # First try to parse the file as a whole JSON array
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            # Try to parse the file as a JSON array
+            entries = json.loads(content)
+            # If entries is not a list, wrap it in one
+            if not isinstance(entries, list):
+                entries = [entries]
+    except json.JSONDecodeError:
+        # If it fails, fall back to line-by-line parsing
+        entries = []
+        with open(file_path, 'r') as f:
+            # .chlsj files may contain one JSON object per line
+            for line in f:
+                try:
+                    if line.strip():  # Skip empty lines
+                        entry = json.loads(line.strip())
+                        entries.append(entry)
+                except json.JSONDecodeError:
+                    continue  # Skip invalid lines
+    
+    # Filter entries by host based on match_type
+    filtered_entries = []
+    for entry in entries:
+        entry_host = entry.get("host", "")
+        
+        # Apply filtering based on match type
+        if match_type == "exact":
+            # Exact match (case-insensitive)
+            if entry_host.lower() == host.lower():
+                filtered_entries.append(entry)
+        else:  # "contains"
+            # Substring match (case-insensitive)
+            if host.lower() in entry_host.lower():
+                filtered_entries.append(entry)
+    
+    # Process based on format type
+    if format_type == "raw":
+        return {"entries": filtered_entries, "filtered_by_host": host, "match_type": match_type}
+    
+    elif format_type == "summary":
+        summary = {
+            "total_entries": len(filtered_entries),
+            "host": host,
+            "request_methods": {},
+            "status_codes": {},
+            "content_types": {},
+            "timing": {
+                "min": float('inf'),
+                "max": 0,
+                "avg": 0,
+                "total": 0
+            }
+        }
+        
+        for entry in filtered_entries:
+            # Count request methods
+            method = entry.get("request", {}).get("method", "UNKNOWN")
+            summary["request_methods"][method] = summary["request_methods"].get(method, 0) + 1
+            
+            # Count status codes
+            status = entry.get("response", {}).get("status", 0)
+            status_str = str(status)
+            summary["status_codes"][status_str] = summary["status_codes"].get(status_str, 0) + 1
+            
+            # Count content types
+            content_type = None
+            response_headers = entry.get("response", {}).get("headers", {})
+            if isinstance(response_headers, dict):
+                content_type_values = response_headers.get("Content-Type", ["UNKNOWN"])
+                if isinstance(content_type_values, list) and len(content_type_values) > 0:
+                    content_type = content_type_values[0]
+            elif isinstance(response_headers, list):
+                # Some Charles formats store headers as a list of objects with name/value
+                for header in response_headers:
+                    if isinstance(header, dict) and header.get("name") == "Content-Type":
+                        content_type = header.get("value")
+                        break
+            
+            if content_type is None:
+                content_type = "UNKNOWN"
+                
+            summary["content_types"][content_type] = summary["content_types"].get(content_type, 0) + 1
+            
+            # Calculate timing stats
+            if "duration" in entry:
+                duration = entry["duration"]
+                summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+                summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+                summary["timing"]["total"] += duration
+            elif "durations" in entry and isinstance(entry["durations"], dict):
+                # Some Charles formats store duration in "durations.total"
+                duration = entry["durations"].get("total")
+                if duration is not None:
+                    summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+                    summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+                    summary["timing"]["total"] += duration
+        
+        # Calculate average
+        if len(filtered_entries) > 0:
+            summary["timing"]["avg"] = summary["timing"]["total"] / len(filtered_entries)
+        
+        # If no entries, reset min to 0
+        if summary["timing"]["min"] == float('inf'):
+            summary["timing"]["min"] = 0
+            
+        return summary
+    
+    # Detailed format (default)
+    else:
+        processed_entries = []
+        
+        for entry in filtered_entries:
+            # Extract basic fields
+            processed_entry = {
+                "url": entry.get("url", ""),
+                "host": entry.get("host", ""),
+                "path": entry.get("path", ""),
+                "status": entry.get("status", ""),  # Some Charles formats use top-level status
+                "duration": 0,
+            }
+            
+            # Process request fields
+            if "request" in entry:
+                request = entry["request"]
+                processed_entry["method"] = request.get("method", "")
+                processed_entry["request_size"] = request.get("size", 0)
+                
+                # Process request headers
+                if "header" in request and "headers" in request["header"]:
+                    # Some Charles formats nest headers under header.headers
+                    processed_entry["request_headers"] = {}
+                    for header in request["header"]["headers"]:
+                        if isinstance(header, dict) and "name" in header and "value" in header:
+                            processed_entry["request_headers"][header["name"]] = header["value"]
+                elif "headers" in request:
+                    # Standard format
+                    processed_entry["request_headers"] = request["headers"]
+                
+                # Add request body if available
+                if "body" in request:
+                    processed_entry["request_body"] = request["body"]
+            
+            # Process response fields
+            if "response" in entry:
+                response = entry["response"]
+                if "status" in response:
+                    processed_entry["status"] = response["status"]
+                processed_entry["response_size"] = response.get("size", 0)
+                
+                # Process response headers
+                if "header" in response and "headers" in response["header"]:
+                    # Some Charles formats nest headers under header.headers
+                    processed_entry["response_headers"] = {}
+                    for header in response["header"]["headers"]:
+                        if isinstance(header, dict) and "name" in header and "value" in header:
+                            processed_entry["response_headers"][header["name"]] = header["value"]
+                elif "headers" in response:
+                    # Standard format
+                    processed_entry["response_headers"] = response["headers"]
+                
+                # Add response body if available
+                if "body" in response:
+                    processed_entry["response_body"] = response["body"]
+            
+            # Handle different duration fields
+            if "duration" in entry:
+                processed_entry["duration"] = entry["duration"]
+            elif "durations" in entry and isinstance(entry["durations"], dict):
+                # Some Charles formats store duration in "durations.total"
+                total_duration = entry["durations"].get("total")
+                if total_duration is not None:
+                    processed_entry["duration"] = total_duration
+            
+            processed_entries.append(processed_entry)
+        
+        return {"entries": processed_entries, "filtered_by_host": host, "match_type": match_type}
+
 @mcp.tool()
 def view_charles_log_dashboard(file_path: str) -> Dict:
     """
@@ -389,18 +683,46 @@ def view_charles_log_dashboard(file_path: str) -> Dict:
         return {"error": "File must be a JSON file"}
     
     try:
-        # Import the dashboard module
+        # Import necessary modules
         import sys
         import tempfile
         import webbrowser
+        import shutil
         from collections import Counter
+        from datetime import datetime
         
         # Load the parsed data
         with open(file_path, 'r') as f:
             data = json.load(f)
         
-        # Create output HTML file
-        output_file = os.path.join(tempfile.gettempdir(), "charles_log_dashboard.html")
+        # Create temp directory for dashboard files
+        temp_dir = os.path.join(tempfile.gettempdir(), "charles_dashboard")
+        if not os.path.exists(temp_dir):
+            os.makedirs(temp_dir)
+        
+        # Create static directories in temp location
+        static_dir = os.path.join(temp_dir, "static")
+        css_dir = os.path.join(static_dir, "css")
+        js_dir = os.path.join(static_dir, "js")
+        
+        # Make sure directories exist
+        for directory in [static_dir, css_dir, js_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+        
+        # Copy static files to temp location
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        shutil.copyfile(
+            os.path.join(script_dir, "dashboard", "static", "css", "dashboard.css"),
+            os.path.join(css_dir, "dashboard.css")
+        )
+        shutil.copyfile(
+            os.path.join(script_dir, "dashboard", "static", "js", "dashboard.js"),
+            os.path.join(js_dir, "dashboard.js")
+        )
+        
+        # Create dashboard output file
+        output_file = os.path.join(temp_dir, "index.html")
         
         # Generate HTML report
         html = generate_html_report(data, file_path)
@@ -423,86 +745,87 @@ def view_charles_log_dashboard(file_path: str) -> Dict:
 def generate_html_report(data, input_file):
     """Generate a HTML report from the parsed data"""
     
-    # Start with HTML header
-    html = """<!DOCTYPE html>
-<html>
-<head>
-    <title>Charles Log Analysis</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        h1, h2, h3 { color: #333; }
-        .container { display: flex; flex-wrap: wrap; }
-        .chart { margin: 10px; padding: 10px; border: 1px solid #ddd; border-radius: 5px; }
-        table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-    </style>
-</head>
-<body>
-    <h1>Charles Proxy Log Analysis</h1>
-"""
+    # Read template file
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    with open(os.path.join(script_dir, "dashboard", "templates", "dashboard.html"), 'r') as f:
+        template = f.read()
     
-    # Add timestamp and filename
-    html += f"<p>Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>\n"
-    html += f"<p>File: {os.path.basename(input_file)}</p>\n"
+    # Prepare template variables
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    filename = os.path.basename(input_file)
     
-    # Handle summary format
+    # Initialize variables
+    total_entries = 0
+    status_code_rows = ""
+    request_method_rows = ""
+    top_host_rows = ""
+    timing_min = 0
+    timing_max = 0
+    timing_avg = 0
+    timing_total = 0
+    
+    # Data for JavaScript charts
+    dashboard_data = {
+        "statusCodes": {},
+        "requestMethods": {},
+        "topHosts": {},
+        "timing": {
+            "min": 0,
+            "max": 0,
+            "avg": 0
+        }
+    }
+    
+    # Handle summary format (from summary tool)
     if isinstance(data, dict) and "total_entries" in data:
-        html += "<h2>Summary</h2>\n"
-        html += f"<p>Total Entries: {data.get('total_entries', 0)}</p>\n"
+        total_entries = data.get('total_entries', 0)
         
-        # Request Methods
-        if "request_methods" in data:
-            html += "<h3>Request Methods</h3>\n"
-            html += "<table>\n"
-            html += "<tr><th>Method</th><th>Count</th></tr>\n"
-            
-            for method, count in sorted(data["request_methods"].items(), key=lambda x: x[1], reverse=True):
-                html += f"<tr><td>{method}</td><td>{count}</td></tr>\n"
-            
-            html += "</table>\n"
-        
-        # Status Codes
+        # Process status codes
         if "status_codes" in data:
-            html += "<h3>Status Codes</h3>\n"
-            html += "<table>\n"
-            html += "<tr><th>Status</th><th>Count</th></tr>\n"
+            status_codes = data["status_codes"]
+            dashboard_data["statusCodes"] = status_codes
             
-            for status, count in sorted(data["status_codes"].items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-                html += f"<tr><td>{status}</td><td>{count}</td></tr>\n"
-            
-            html += "</table>\n"
+            total_status = sum(status_codes.values())
+            for status, count in sorted(status_codes.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
+                percentage = (count / total_status) * 100 if total_status > 0 else 0
+                status_code_rows += f"<tr><td>{status}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
         
-        # Hosts
+        # Process request methods
+        if "request_methods" in data:
+            request_methods = data["request_methods"]
+            dashboard_data["requestMethods"] = request_methods
+            
+            total_methods = sum(request_methods.values())
+            for method, count in sorted(request_methods.items(), key=lambda x: x[1], reverse=True):
+                percentage = (count / total_methods) * 100 if total_methods > 0 else 0
+                request_method_rows += f"<tr><td>{method}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
+        
+        # Process hosts
         if "hosts" in data:
-            html += "<h3>Top Hosts</h3>\n"
-            html += "<table>\n"
-            html += "<tr><th>Host</th><th>Count</th></tr>\n"
+            hosts = data["hosts"]
+            dashboard_data["topHosts"] = hosts
             
-            for host, count in sorted(data["hosts"].items(), key=lambda x: x[1], reverse=True)[:20]:
-                html += f"<tr><td>{host}</td><td>{count}</td></tr>\n"
-            
-            html += "</table>\n"
+            total_hosts = sum(hosts.values())
+            for host, count in sorted(hosts.items(), key=lambda x: x[1], reverse=True)[:20]:
+                percentage = (count / total_hosts) * 100 if total_hosts > 0 else 0
+                top_host_rows += f"<tr><td>{host}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
         
-        # Timing
+        # Process timing
         if "timing" in data:
-            html += "<h3>Timing (ms)</h3>\n"
-            html += "<table>\n"
-            html += "<tr><th>Metric</th><th>Value</th></tr>\n"
-            html += f"<tr><td>Minimum</td><td>{data['timing'].get('min', 0)}</td></tr>\n"
-            html += f"<tr><td>Maximum</td><td>{data['timing'].get('max', 0)}</td></tr>\n"
-            html += f"<tr><td>Average</td><td>{data['timing'].get('avg', 0)}</td></tr>\n"
-            html += f"<tr><td>Total</td><td>{data['timing'].get('total', 0)}</td></tr>\n"
-            html += "</table>\n"
+            timing = data["timing"]
+            dashboard_data["timing"] = timing
+            
+            timing_min = timing.get('min', 0)
+            timing_max = timing.get('max', 0)
+            timing_avg = timing.get('avg', 0)
+            timing_total = timing.get('total', 0)
     
-    # Handle detailed format
+    # Handle detailed format (from entries)
     elif "entries" in data:
         entries = data["entries"]
-        html += "<h2>Detailed Report</h2>\n"
-        html += f"<p>Total Entries: {len(entries)}</p>\n"
+        total_entries = len(entries)
         
-        # Count status codes
+        # Count status codes, hosts, methods, durations
         status_counts = Counter()
         host_counts = Counter()
         methods = Counter()
@@ -529,51 +852,62 @@ def generate_html_report(data, input_file):
                 except (ValueError, TypeError):
                     pass
         
-        # Status Codes
-        html += "<h3>Status Codes</h3>\n"
-        html += "<table>\n"
-        html += "<tr><th>Status</th><th>Count</th></tr>\n"
-        
+        # Prepare status code rows
+        dashboard_data["statusCodes"] = dict(status_counts)
+        total_status = sum(status_counts.values())
         for status, count in sorted(status_counts.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-            html += f"<tr><td>{status}</td><td>{count}</td></tr>\n"
+            percentage = (count / total_status) * 100 if total_status > 0 else 0
+            status_code_rows += f"<tr><td>{status}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
         
-        html += "</table>\n"
-        
-        # Top Hosts
-        html += "<h3>Top Hosts</h3>\n"
-        html += "<table>\n"
-        html += "<tr><th>Host</th><th>Count</th></tr>\n"
-        
-        for host, count in host_counts.most_common(20):
-            html += f"<tr><td>{host}</td><td>{count}</td></tr>\n"
-        
-        html += "</table>\n"
-        
-        # Request Methods
-        html += "<h3>Request Methods</h3>\n"
-        html += "<table>\n"
-        html += "<tr><th>Method</th><th>Count</th></tr>\n"
-        
+        # Prepare request method rows
+        dashboard_data["requestMethods"] = dict(methods)
+        total_methods = sum(methods.values())
         for method, count in methods.most_common():
-            html += f"<tr><td>{method}</td><td>{count}</td></tr>\n"
+            percentage = (count / total_methods) * 100 if total_methods > 0 else 0
+            request_method_rows += f"<tr><td>{method}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
         
-        html += "</table>\n"
+        # Prepare host rows
+        dashboard_data["topHosts"] = dict(host_counts)
+        total_hosts = sum(host_counts.values())
+        for host, count in host_counts.most_common(20):
+            percentage = (count / total_hosts) * 100 if total_hosts > 0 else 0
+            top_host_rows += f"<tr><td>{host}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
         
-        # Timing
+        # Process timing
         if durations:
-            html += "<h3>Timing (ms)</h3>\n"
-            html += "<table>\n"
-            html += "<tr><th>Metric</th><th>Value</th></tr>\n"
-            html += f"<tr><td>Minimum</td><td>{min(durations)}</td></tr>\n"
-            html += f"<tr><td>Maximum</td><td>{max(durations)}</td></tr>\n"
-            html += f"<tr><td>Average</td><td>{sum(durations) / len(durations):.2f}</td></tr>\n"
-            html += f"<tr><td>Total</td><td>{sum(durations)}</td></tr>\n"
-            html += "</table>\n"
+            timing_min = min(durations)
+            timing_max = max(durations)
+            timing_avg = sum(durations) / len(durations)
+            timing_total = sum(durations)
+            
+            dashboard_data["timing"] = {
+                "min": timing_min,
+                "max": timing_max,
+                "avg": timing_avg
+            }
+            
+            # Add duration distribution for the histogram
+            dashboard_data["durationDistribution"] = durations
     
-    # Close HTML
-    html += """</body>
-</html>
-"""
+    # Determine if we should show the duration distribution chart
+    display_duration_distribution = "block" if "durationDistribution" in dashboard_data else "none"
+    
+    # Replace template variables
+    html = template.replace("{{timestamp}}", timestamp)
+    html = html.replace("{{filename}}", filename)
+    html = html.replace("{{total_entries}}", str(total_entries))
+    html = html.replace("{{status_code_rows}}", status_code_rows)
+    html = html.replace("{{request_method_rows}}", request_method_rows)
+    html = html.replace("{{top_host_rows}}", top_host_rows)
+    html = html.replace("{{timing_min}}", str(timing_min))
+    html = html.replace("{{timing_max}}", str(timing_max))
+    html = html.replace("{{timing_avg}}", f"{timing_avg:.2f}")
+    html = html.replace("{{timing_total}}", str(timing_total))
+    html = html.replace("{{display_duration_distribution}}", display_duration_distribution)
+    
+    # JSON encode the data for JavaScript
+    dashboard_data_json = json.dumps(dashboard_data)
+    html = html.replace("{{dashboard_data_json}}", dashboard_data_json)
     
     return html
 
