@@ -13,7 +13,7 @@ graph TD
     end
     
     subgraph "mcp-charles-shared"
-        SharedOutput -->|JSON files| SharedDir[/output/ dir]
+        SharedOutput -->|JSON files| SharedDir["output directory"]
     end
     
     subgraph "mcp-charles-dashboard"
