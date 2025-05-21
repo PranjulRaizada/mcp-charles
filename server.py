@@ -683,233 +683,27 @@ def view_charles_log_dashboard(file_path: str) -> Dict:
         return {"error": "File must be a JSON file"}
     
     try:
-        # Import necessary modules
-        import sys
-        import tempfile
-        import webbrowser
-        import shutil
-        from collections import Counter
-        from datetime import datetime
-        
         # Load the parsed data
         with open(file_path, 'r') as f:
             data = json.load(f)
         
-        # Create temp directory for dashboard files
-        temp_dir = os.path.join(tempfile.gettempdir(), "charles_dashboard")
-        if not os.path.exists(temp_dir):
-            os.makedirs(temp_dir)
+        # Create shared directory if it doesn't exist
+        shared_dir = "/Users/pranjulraizada/NewAIProject/git/mcp-charles-shared/output"
+        if not os.path.exists(shared_dir):
+            os.makedirs(shared_dir)
         
-        # Create static directories in temp location
-        static_dir = os.path.join(temp_dir, "static")
-        css_dir = os.path.join(static_dir, "css")
-        js_dir = os.path.join(static_dir, "js")
-        
-        # Make sure directories exist
-        for directory in [static_dir, css_dir, js_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-        
-        # Copy static files to temp location
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        shutil.copyfile(
-            os.path.join(script_dir, "dashboard", "static", "css", "dashboard.css"),
-            os.path.join(css_dir, "dashboard.css")
-        )
-        shutil.copyfile(
-            os.path.join(script_dir, "dashboard", "static", "js", "dashboard.js"),
-            os.path.join(js_dir, "dashboard.js")
-        )
-        
-        # Create dashboard output file
-        output_file = os.path.join(temp_dir, "index.html")
-        
-        # Generate HTML report
-        html = generate_html_report(data, file_path)
-        
-        # Write to file
-        with open(output_file, 'w') as f:
-            f.write(html)
-        
-        # Open in browser
-        webbrowser.open('file://' + os.path.abspath(output_file))
+        # Copy the file to the shared directory
+        output_file = os.path.join(shared_dir, os.path.basename(file_path))
+        shutil.copyfile(file_path, output_file)
         
         return {
             "status": "success",
-            "message": f"Dashboard opened in browser",
-            "dashboard_file": output_file
+            "message": f"File saved to shared directory: {output_file}",
+            "note": "Please run the standalone dashboard from the mcp-charles-dashboard repository to view the data",
+            "command": "cd ../mcp-charles-dashboard && ./run_dashboard.sh"
         }
     except Exception as e:
-        return {"error": f"Error creating dashboard: {str(e)}"}
-
-def generate_html_report(data, input_file):
-    """Generate a HTML report from the parsed data"""
-    
-    # Read template file
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    with open(os.path.join(script_dir, "dashboard", "templates", "dashboard.html"), 'r') as f:
-        template = f.read()
-    
-    # Prepare template variables
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    filename = os.path.basename(input_file)
-    
-    # Initialize variables
-    total_entries = 0
-    status_code_rows = ""
-    request_method_rows = ""
-    top_host_rows = ""
-    timing_min = 0
-    timing_max = 0
-    timing_avg = 0
-    timing_total = 0
-    
-    # Data for JavaScript charts
-    dashboard_data = {
-        "statusCodes": {},
-        "requestMethods": {},
-        "topHosts": {},
-        "timing": {
-            "min": 0,
-            "max": 0,
-            "avg": 0
-        }
-    }
-    
-    # Handle summary format (from summary tool)
-    if isinstance(data, dict) and "total_entries" in data:
-        total_entries = data.get('total_entries', 0)
-        
-        # Process status codes
-        if "status_codes" in data:
-            status_codes = data["status_codes"]
-            dashboard_data["statusCodes"] = status_codes
-            
-            total_status = sum(status_codes.values())
-            for status, count in sorted(status_codes.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-                percentage = (count / total_status) * 100 if total_status > 0 else 0
-                status_code_rows += f"<tr><td>{status}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Process request methods
-        if "request_methods" in data:
-            request_methods = data["request_methods"]
-            dashboard_data["requestMethods"] = request_methods
-            
-            total_methods = sum(request_methods.values())
-            for method, count in sorted(request_methods.items(), key=lambda x: x[1], reverse=True):
-                percentage = (count / total_methods) * 100 if total_methods > 0 else 0
-                request_method_rows += f"<tr><td>{method}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Process hosts
-        if "hosts" in data:
-            hosts = data["hosts"]
-            dashboard_data["topHosts"] = hosts
-            
-            total_hosts = sum(hosts.values())
-            for host, count in sorted(hosts.items(), key=lambda x: x[1], reverse=True)[:20]:
-                percentage = (count / total_hosts) * 100 if total_hosts > 0 else 0
-                top_host_rows += f"<tr><td>{host}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Process timing
-        if "timing" in data:
-            timing = data["timing"]
-            dashboard_data["timing"] = timing
-            
-            timing_min = timing.get('min', 0)
-            timing_max = timing.get('max', 0)
-            timing_avg = timing.get('avg', 0)
-            timing_total = timing.get('total', 0)
-    
-    # Handle detailed format (from entries)
-    elif "entries" in data:
-        entries = data["entries"]
-        total_entries = len(entries)
-        
-        # Count status codes, hosts, methods, durations
-        status_counts = Counter()
-        host_counts = Counter()
-        methods = Counter()
-        durations = []
-        
-        for entry in entries:
-            # Status codes
-            status = str(entry.get("status", "Unknown"))
-            status_counts[status] += 1
-            
-            # Hosts
-            host = entry.get("host", "Unknown")
-            host_counts[host] += 1
-            
-            # Methods
-            method = entry.get("method", "Unknown")
-            methods[method] += 1
-            
-            # Durations
-            if "duration" in entry:
-                try:
-                    duration = float(entry["duration"])
-                    durations.append(duration)
-                except (ValueError, TypeError):
-                    pass
-        
-        # Prepare status code rows
-        dashboard_data["statusCodes"] = dict(status_counts)
-        total_status = sum(status_counts.values())
-        for status, count in sorted(status_counts.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 0):
-            percentage = (count / total_status) * 100 if total_status > 0 else 0
-            status_code_rows += f"<tr><td>{status}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Prepare request method rows
-        dashboard_data["requestMethods"] = dict(methods)
-        total_methods = sum(methods.values())
-        for method, count in methods.most_common():
-            percentage = (count / total_methods) * 100 if total_methods > 0 else 0
-            request_method_rows += f"<tr><td>{method}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Prepare host rows
-        dashboard_data["topHosts"] = dict(host_counts)
-        total_hosts = sum(host_counts.values())
-        for host, count in host_counts.most_common(20):
-            percentage = (count / total_hosts) * 100 if total_hosts > 0 else 0
-            top_host_rows += f"<tr><td>{host}</td><td>{count}</td><td>{percentage:.1f}%</td></tr>\n"
-        
-        # Process timing
-        if durations:
-            timing_min = min(durations)
-            timing_max = max(durations)
-            timing_avg = sum(durations) / len(durations)
-            timing_total = sum(durations)
-            
-            dashboard_data["timing"] = {
-                "min": timing_min,
-                "max": timing_max,
-                "avg": timing_avg
-            }
-            
-            # Add duration distribution for the histogram
-            dashboard_data["durationDistribution"] = durations
-    
-    # Determine if we should show the duration distribution chart
-    display_duration_distribution = "block" if "durationDistribution" in dashboard_data else "none"
-    
-    # Replace template variables
-    html = template.replace("{{timestamp}}", timestamp)
-    html = html.replace("{{filename}}", filename)
-    html = html.replace("{{total_entries}}", str(total_entries))
-    html = html.replace("{{status_code_rows}}", status_code_rows)
-    html = html.replace("{{request_method_rows}}", request_method_rows)
-    html = html.replace("{{top_host_rows}}", top_host_rows)
-    html = html.replace("{{timing_min}}", str(timing_min))
-    html = html.replace("{{timing_max}}", str(timing_max))
-    html = html.replace("{{timing_avg}}", f"{timing_avg:.2f}")
-    html = html.replace("{{timing_total}}", str(timing_total))
-    html = html.replace("{{display_duration_distribution}}", display_duration_distribution)
-    
-    # JSON encode the data for JavaScript
-    dashboard_data_json = json.dumps(dashboard_data)
-    html = html.replace("{{dashboard_data_json}}", dashboard_data_json)
-    
-    return html
+        return {"error": f"Error preparing dashboard: {str(e)}"}
 
 # Run the server if executed directly
 if __name__ == "__main__":
