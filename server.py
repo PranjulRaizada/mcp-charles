@@ -705,6 +705,567 @@ def view_charles_log_dashboard(file_path: str) -> Dict:
     except Exception as e:
         return {"error": f"Error preparing dashboard: {str(e)}"}
 
+@mcp.tool()
+def compare_api_structures(file_paths: List[str], output_dir: str = "./output", comparison_level: str = "detailed") -> Dict:
+    """
+    Compare multiple Charles log files to identify differences in API structures.
+    
+    Args:
+        file_paths: List of paths to parsed JSON files (2-3 files)
+        output_dir: Directory to save the comparison report
+        comparison_level: Level of comparison (basic, detailed, comprehensive)
+        
+    Returns:
+        A dictionary containing the comparison results
+    """
+    # Validate input parameters
+    if len(file_paths) < 2:
+        return {"error": "At least two files are required for comparison"}
+    
+    if len(file_paths) > 3:
+        return {"error": "Maximum of three files can be compared at once"}
+    
+    # Validate all files exist and are JSON
+    for file_path in file_paths:
+        if not os.path.exists(file_path):
+            return {"error": f"File not found: {file_path}"}
+        
+        if not file_path.endswith('.json'):
+            return {"error": f"File must be a JSON file: {file_path}"}
+    
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except Exception as e:
+            return {"error": f"Error creating output directory: {str(e)}"}
+    
+    try:
+        # Load all files
+        files_data = []
+        file_names = []
+        
+        for file_path in file_paths:
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+                files_data.append(data)
+                file_names.append(os.path.basename(file_path))
+        
+        # Group APIs by endpoints across files
+        endpoint_mapping = _map_endpoints_across_files(files_data, file_names)
+        
+        # Analyze differences
+        comparison_results = _analyze_api_differences(endpoint_mapping, comparison_level)
+        
+        # Count endpoints with changes
+        endpoints_with_changes = sum(1 for endpoint in comparison_results.values() if endpoint["has_changes"])
+        
+        # Generate a summary report
+        summary = {
+            "comparison_time": datetime.now().isoformat(),
+            "files_compared": file_names,
+            "total_endpoints_analyzed": len(endpoint_mapping),
+            "endpoints_with_changes": endpoints_with_changes,
+            "comparison_level": comparison_level,
+            "detailed_results": comparison_results
+        }
+        
+        # Write results to file
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_file = os.path.join(output_dir, f"api_comparison_{timestamp}.json")
+        
+        with open(output_file, 'w') as f:
+            json.dump(summary, f, indent=2)
+        
+        return {
+            "status": "success",
+            "message": f"Successfully compared {len(file_paths)} files and saved results to {output_file}",
+            "output_file": output_file,
+            "summary": {
+                "total_endpoints": len(endpoint_mapping),
+                "endpoints_with_changes": endpoints_with_changes,
+                "files_compared": file_names
+            },
+            "detailed_results": comparison_results  # Include detailed results in the return value
+        }
+        
+    except Exception as e:
+        return {"error": f"Error comparing API structures: {str(e)}"}
+
+def _map_endpoints_across_files(files_data: List[Dict], file_names: List[str]) -> Dict:
+    """
+    Map endpoints across multiple files to prepare for comparison.
+    
+    Args:
+        files_data: List of parsed data from each file
+        file_names: List of file names corresponding to the data
+        
+    Returns:
+        Dictionary mapping endpoints to their occurrences in each file
+    """
+    endpoint_mapping = {}
+    
+    for idx, data in enumerate(files_data):
+        file_name = file_names[idx]
+        
+        # Handle the case where entries are in the 'data' field
+        entries = data.get('data', [])
+        if not entries:
+            continue
+        
+        # Process each entry
+        for entry_idx, entry in enumerate(entries):
+            # Create a unique key for this API endpoint
+            method = entry.get("method", "UNKNOWN")
+            host = entry.get("host", "UNKNOWN")
+            path = entry.get("path", "UNKNOWN")
+            endpoint_key = f"{method}:{host}{path}"
+            
+            # Initialize endpoint data if not seen before
+            if endpoint_key not in endpoint_mapping:
+                endpoint_mapping[endpoint_key] = {
+                    "method": method,
+                    "host": host,
+                    "path": path,
+                    "occurrences": {}
+                }
+            
+            # Store this occurrence with instance index
+            if file_name not in endpoint_mapping[endpoint_key]["occurrences"]:
+                endpoint_mapping[endpoint_key]["occurrences"][file_name] = []
+            
+            # Store complete instance data
+            instance_data = {
+                "index": entry_idx,
+                "status": entry.get("status"),
+                "timestamp": entry.get("timestamp"),
+                "request": {
+                    "headers": entry.get("request", {}).get("headers", {}),
+                    "body": entry.get("request", {}).get("body"),  # Store body even if None
+                    "cookies": entry.get("request", {}).get("cookies", []),
+                    "query_params": entry.get("request", {}).get("query_params", [])
+                },
+                "response": {
+                    "headers": entry.get("response", {}).get("headers", {}),
+                    "body": entry.get("response", {}).get("body"),  # Store body even if None
+                    "cookies": entry.get("response", {}).get("cookies", [])
+                }
+            }
+            endpoint_mapping[endpoint_key]["occurrences"][file_name].append(instance_data)
+    
+    return endpoint_mapping
+
+def _compare_parameters(param1, param2, file1: str, file2: str, path: List[str] = None) -> Dict:
+    """
+    Perform a detailed comparison of parameters between two API entries.
+    
+    Args:
+        param1: Parameter from first file
+        param2: Parameter from second file
+        file1: Name of first file
+        file2: Name of second file
+        path: Current path in the parameter hierarchy
+        
+    Returns:
+        Dictionary containing detailed parameter differences
+    """
+    if path is None:
+        path = []
+        
+    differences = {}
+    current_path = ".".join(path) if path else "root"
+    
+    # Handle None values
+    if param1 is None and param2 is None:
+        return differences
+    elif param1 is None:
+        differences[current_path] = {
+            "type": "missing_in_first",
+            "value": str(param2)[:100] if param2 is not None else "None"
+        }
+        return differences
+    elif param2 is None:
+        differences[current_path] = {
+            "type": "missing_in_second",
+            "value": str(param1)[:100] if param1 is not None else "None"
+        }
+        return differences
+    
+    # Compare dictionaries
+    if isinstance(param1, dict) and isinstance(param2, dict):
+        # Compare all keys in both dictionaries
+        all_keys = set(param1.keys()) | set(param2.keys())
+        for key in all_keys:
+            new_path = path + [key]
+            if key not in param1:
+                differences[".".join(new_path)] = {
+                    "type": "missing_in_first",
+                    "value": str(param2[key])[:100]
+                }
+            elif key not in param2:
+                differences[".".join(new_path)] = {
+                    "type": "missing_in_second",
+                    "value": str(param1[key])[:100]
+                }
+            else:
+                nested_diff = _compare_parameters(param1[key], param2[key], file1, file2, new_path)
+                differences.update(nested_diff)
+    
+    # Compare lists
+    elif isinstance(param1, list) and isinstance(param2, list):
+        # Compare list lengths
+        if len(param1) != len(param2):
+            differences[current_path] = {
+                "type": "length_mismatch",
+                f"{file1}_length": len(param1),
+                f"{file2}_length": len(param2)
+            }
+        
+        # Compare list items
+        max_items = min(len(param1), len(param2))
+        for i in range(max_items):
+            new_path = path + [f"[{i}]"]
+            nested_diff = _compare_parameters(param1[i], param2[i], file1, file2, new_path)
+            differences.update(nested_diff)
+        
+        # Report extra items
+        for i in range(max_items, len(param1)):
+            new_path = path + [f"[{i}]"]
+            differences[".".join(new_path)] = {
+                "type": "extra_in_first",
+                "value": str(param1[i])[:100]
+            }
+        for i in range(max_items, len(param2)):
+            new_path = path + [f"[{i}]"]
+            differences[".".join(new_path)] = {
+                "type": "extra_in_second",
+                "value": str(param2[i])[:100]
+            }
+    
+    # Compare primitive values
+    else:
+        # Try to parse JSON strings
+        parsed1 = _try_parse_json(param1)
+        parsed2 = _try_parse_json(param2)
+        
+        if type(parsed1) != type(parsed2):
+            differences[current_path] = {
+                "type": "type_mismatch",
+                f"{file1}_type": type(parsed1).__name__,
+                f"{file2}_type": type(parsed2).__name__,
+                f"{file1}_value": str(parsed1)[:100],
+                f"{file2}_value": str(parsed2)[:100]
+            }
+        elif parsed1 != parsed2:
+            differences[current_path] = {
+                "type": "value_mismatch",
+                f"{file1}_value": str(parsed1)[:100],
+                f"{file2}_value": str(parsed2)[:100]
+            }
+    
+    return differences
+
+def _analyze_api_differences(endpoint_mapping: Dict, comparison_level: str) -> Dict:
+    """
+    Analyze differences between API endpoints across files.
+    
+    Args:
+        endpoint_mapping: Mapping of endpoints to their occurrences in each file
+        comparison_level: Level of detail for the comparison
+        
+    Returns:
+        Dictionary of comparison results for each endpoint
+    """
+    comparison_results = {}
+    
+    for endpoint_key, endpoint_data in endpoint_mapping.items():
+        occurrences = endpoint_data["occurrences"]
+        file_names = list(occurrences.keys())
+        
+        # Initialize result structure
+        result = {
+            "method": endpoint_data["method"],
+            "host": endpoint_data["host"],
+            "path": endpoint_data["path"],
+            "has_changes": False,
+            "present_in": file_names,
+            "missing_in": [],
+            "instance_counts": {},
+            "differences": {
+                "request": {},
+                "response": {},
+                "headers": {},
+                "status_codes": {},
+                "parameters": {}
+            }
+        }
+        
+        # Record instance counts for each file
+        for file_name in file_names:
+            instances = occurrences[file_name]
+            result["instance_counts"][file_name] = len(instances)
+        
+        # Compare across file pairs
+        for i in range(len(file_names)):
+            for j in range(i + 1, len(file_names)):
+                file1 = file_names[i]
+                file2 = file_names[j]
+                
+                instances1 = occurrences[file1]
+                instances2 = occurrences[file2]
+                
+                # Compare each instance pair
+                max_instances = max(len(instances1), len(instances2))
+                for instance_idx in range(max_instances):
+                    comparison_key = f"{file1}_vs_{file2}_instance_{instance_idx + 1}"
+                    
+                    # Get instances if available
+                    inst1 = instances1[instance_idx] if instance_idx < len(instances1) else None
+                    inst2 = instances2[instance_idx] if instance_idx < len(instances2) else None
+                    
+                    # Log instance details
+                    result["differences"][comparison_key] = {
+                        "instance_details": {
+                            file1: {
+                                "available": inst1 is not None,
+                                "index": inst1["index"] if inst1 else None,
+                                "timestamp": inst1["timestamp"] if inst1 else None
+                            },
+                            file2: {
+                                "available": inst2 is not None,
+                                "index": inst2["index"] if inst2 else None,
+                                "timestamp": inst2["timestamp"] if inst2 else None
+                            }
+                        }
+                    }
+                    
+                    # Skip if either instance is missing
+                    if not inst1 or not inst2:
+                        result["has_changes"] = True
+                        result["differences"][comparison_key]["missing_instance"] = {
+                            "detail": f"Instance {instance_idx + 1} missing in {'first' if not inst1 else 'second'} file"
+                        }
+                        continue
+                    
+                    # Compare request parameters
+                    param_diff = _compare_parameters(
+                        inst1["request"],
+                        inst2["request"],
+                        file1, file2,
+                        ["request"]
+                    )
+                    if param_diff:
+                        result["has_changes"] = True
+                        result["differences"][comparison_key]["request_differences"] = param_diff
+                    
+                    # Compare response parameters
+                    param_diff = _compare_parameters(
+                        inst1["response"],
+                        inst2["response"],
+                        file1, file2,
+                        ["response"]
+                    )
+                    if param_diff:
+                        result["has_changes"] = True
+                        result["differences"][comparison_key]["response_differences"] = param_diff
+                    
+                    # Compare status codes
+                    if inst1["status"] != inst2["status"]:
+                        result["has_changes"] = True
+                        result["differences"][comparison_key]["status_difference"] = {
+                            file1: inst1["status"],
+                            file2: inst2["status"]
+                        }
+                    
+                    # Compare headers
+                    _compare_headers(
+                        inst1["request"]["headers"],
+                        inst2["request"]["headers"],
+                        file1, file2,
+                        "request",
+                        result["differences"][comparison_key]
+                    )
+                    
+                    _compare_headers(
+                        inst1["response"]["headers"],
+                        inst2["response"]["headers"],
+                        file1, file2,
+                        "response",
+                        result["differences"][comparison_key]
+                    )
+                    
+                    # If no differences were found for this instance comparison, note that
+                    if len(result["differences"][comparison_key]) == 1:  # Only has instance_details
+                        result["differences"][comparison_key]["note"] = "No differences found for this instance pair"
+        
+        # Add this endpoint's comparison results
+        comparison_results[endpoint_key] = result
+    
+    return comparison_results
+
+def _compare_headers(headers1: Dict, headers2: Dict, file1: str, file2: str, header_type: str, result_container: Dict) -> None:
+    """
+    Compare headers between two API entries and record differences.
+    
+    Args:
+        headers1: Headers from first file
+        headers2: Headers from second file
+        file1: Name of first file
+        file2: Name of second file
+        header_type: Type of headers (request or response)
+        result_container: Dictionary to store results in
+    """
+    comparison_key = f"{file1}_vs_{file2}_{header_type}"
+    result_container[comparison_key] = {}
+    
+    # Find headers in file1 but not in file2
+    for header_name, header_value in headers1.items():
+        if header_name not in headers2:
+            result_container[comparison_key][f"only_in_{file1}"] = result_container[comparison_key].get(f"only_in_{file1}", {})
+            result_container[comparison_key][f"only_in_{file1}"][header_name] = header_value
+        elif headers2[header_name] != header_value:
+            result_container[comparison_key][f"different_values"] = result_container[comparison_key].get("different_values", {})
+            result_container[comparison_key][f"different_values"][header_name] = {
+                file1: header_value,
+                file2: headers2[header_name]
+            }
+    
+    # Find headers in file2 but not in file1
+    for header_name, header_value in headers2.items():
+        if header_name not in headers1:
+            result_container[comparison_key][f"only_in_{file2}"] = result_container[comparison_key].get(f"only_in_{file2}", {})
+            result_container[comparison_key][f"only_in_{file2}"][header_name] = header_value
+    
+    # Remove empty comparison if no differences found
+    if not result_container[comparison_key]:
+        del result_container[comparison_key]
+
+def _try_parse_json(payload):
+    """
+    Try to parse a string as JSON, return the original if not possible.
+    """
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+    return payload
+
+def _deep_compare_structures(obj1, obj2, path, include_values=False):
+    """
+    Recursively compare two objects and return differences in their structure and values.
+    
+    Args:
+        obj1: First object
+        obj2: Second object
+        path: Current path in the object hierarchy
+        include_values: Whether to include actual values in the comparison
+        
+    Returns:
+        List of differences found
+    """
+    differences = []
+    
+    # If both are dictionaries
+    if isinstance(obj1, dict) and isinstance(obj2, dict):
+        # Check for keys in obj1 not in obj2
+        for key in obj1:
+            if key not in obj2:
+                differences.append({
+                    "path": ".".join(path + [key]),
+                    "difference": "field_missing_in_second",
+                    "value": str(obj1[key])[:100] if include_values else None
+                })
+            else:
+                # Always compare values for primitive types
+                if not isinstance(obj1[key], (dict, list)):
+                    if obj1[key] != obj2[key]:
+                        differences.append({
+                            "path": ".".join(path + [key]),
+                            "difference": "value_changed",
+                            "value1": str(obj1[key])[:100],
+                            "value2": str(obj2[key])[:100]
+                        })
+                # Recursively compare nested structures
+                else:
+                    nested_diffs = _deep_compare_structures(obj1[key], obj2[key], path + [key], include_values)
+                    differences.extend(nested_diffs)
+        
+        # Check for keys in obj2 not in obj1
+        for key in obj2:
+            if key not in obj1:
+                differences.append({
+                    "path": ".".join(path + [key]),
+                    "difference": "field_missing_in_first",
+                    "value": str(obj2[key])[:100] if include_values else None
+                })
+    
+    # If both are lists, compare all items
+    elif isinstance(obj1, list) and isinstance(obj2, list):
+        # Compare lengths
+        if len(obj1) != len(obj2):
+            differences.append({
+                "path": ".".join(path) or "root",
+                "difference": "array_length_changed",
+                "length1": len(obj1),
+                "length2": len(obj2)
+            })
+        
+        # Compare all items up to the length of the shorter list
+        max_items = min(len(obj1), len(obj2))
+        for i in range(max_items):
+            item_path = path + [f"[{i}]"]
+            # For primitive types, compare values directly
+            if not isinstance(obj1[i], (dict, list)):
+                if obj1[i] != obj2[i]:
+                    differences.append({
+                        "path": ".".join(item_path),
+                        "difference": "array_item_changed",
+                        "value1": str(obj1[i])[:100],
+                        "value2": str(obj2[i])[:100]
+                    })
+            # For complex types, compare recursively
+            else:
+                item_diffs = _deep_compare_structures(obj1[i], obj2[i], item_path, include_values)
+                differences.extend(item_diffs)
+        
+        # Report extra items in longer list
+        if len(obj1) > len(obj2):
+            for i in range(len(obj2), len(obj1)):
+                differences.append({
+                    "path": ".".join(path + [f"[{i}]"]),
+                    "difference": "extra_item_in_first",
+                    "value": str(obj1[i])[:100] if include_values else None
+                })
+        elif len(obj2) > len(obj1):
+            for i in range(len(obj1), len(obj2)):
+                differences.append({
+                    "path": ".".join(path + [f"[{i}]"]),
+                    "difference": "extra_item_in_second",
+                    "value": str(obj2[i])[:100] if include_values else None
+                })
+    
+    # If types are different, record the difference
+    elif type(obj1) != type(obj2):
+        differences.append({
+            "path": ".".join(path) or "root",
+            "difference": "type_changed",
+            "type1": str(type(obj1).__name__),
+            "type2": str(type(obj2).__name__),
+            "value1": str(obj1)[:100] if include_values else None,
+            "value2": str(obj2)[:100] if include_values else None
+        })
+    # For primitive types, compare values if they're different
+    elif obj1 != obj2:
+        differences.append({
+            "path": ".".join(path) or "root",
+            "difference": "value_changed",
+            "value1": str(obj1)[:100],
+            "value2": str(obj2)[:100]
+        })
+    
+    return differences
+
 # Run the server if executed directly
 if __name__ == "__main__":
     import sys

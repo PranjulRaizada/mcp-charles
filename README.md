@@ -203,3 +203,109 @@ python large_file_example.py /path/to/large-file.chlsj --output results.json
 
 - Currently only supports .chlsj files (JSON format)
 - Binary .chls files are not supported yet 
+
+# API Comparison Dashboard
+
+This tool provides automated comparison of API structures between different versions of Charles proxy logs, helping you identify changes in API contracts over time.
+
+## Features
+
+- Compare API structures between two or three JSON files
+- Identify added, removed, and modified endpoints
+- Detailed analysis of changes in request/response structures
+- Visual dashboard for exploring API differences
+- Support for custom metadata to track versions
+
+## Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/mcp-charles-dashboard-comparision.git
+   cd mcp-charles-dashboard-comparision
+   ```
+
+2. Run the dashboard:
+   ```bash
+   ./run_dashboard.sh
+   ```
+   This will:
+   - Create a virtual environment if it doesn't exist
+   - Install required dependencies
+   - Start the dashboard on http://localhost:5000
+
+## Usage
+
+### 1. Generate Comparison Data
+
+Use the `dashboard_ready_comparison.py` script to compare API logs and generate dashboard-ready data:
+
+```bash
+python dashboard_ready_comparison.py \
+  --file_paths '["/path/to/file1.json", "/path/to/file2.json"]' \
+  --output_dir "./dashboard_data" \
+  --comparison_level "comprehensive" \
+  --metadata '{"version_labels": ["v1.0", "v2.0"]}'
+```
+
+Parameters:
+- `file_paths`: JSON array of file paths to compare (2-3 files)
+- `output_dir`: Directory to save comparison results (default: "./dashboard_data")
+- `comparison_level`: Level of detail for comparison (choices: "basic", "detailed", "comprehensive")
+- `metadata`: Optional JSON string of metadata to include in the results
+
+### 2. View the Dashboard
+
+Once you've generated comparison data, you can view it in the dashboard:
+
+1. Start the dashboard if not already running:
+   ```bash
+   ./run_dashboard.sh
+   ```
+
+2. Open your browser to http://localhost:5000
+
+## Dashboard Features
+
+The dashboard provides:
+
+- List of all comparisons with timestamps
+- Summary statistics for each comparison
+- Visual representation of API changes
+- Detailed view of differences for each endpoint
+- Filtering options to focus on specific change types
+- Sortable tables for easy navigation
+
+## Example
+
+```bash
+# Compare two API logs
+python dashboard_ready_comparison.py \
+  --file_paths '["/path/to/old_api.json", "/path/to/new_api.json"]' \
+  --output_dir "./dashboard_data" \
+  --comparison_level "comprehensive" \
+  --metadata '{"version_labels": ["v1.2.3", "v1.3.0"], "release_date": "2024-03-20"}'
+
+# Start the dashboard
+./run_dashboard.sh
+```
+
+## Project Structure
+
+```
+.
+├── README.md
+├── requirements.txt
+├── run_dashboard.sh
+├── dashboard_ready_comparison.py
+├── simple_dashboard.py
+├── comparison_utils.py
+└── templates/
+    ├── base.html
+    ├── comparison.html
+    ├── error.html
+    └── index.html
+```
+
+## Integration
+
+This tool can be integrated into your CI/CD pipeline to automatically generate comparison reports between different releases or environments. 
