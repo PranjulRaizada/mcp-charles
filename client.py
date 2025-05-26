@@ -21,7 +21,7 @@ async def main():
     parser.add_argument('--dashboard', action='store_true', help='Open a dashboard in browser to visualize the results')
     parser.add_argument('--host', help='Filter by hostname (e.g., "dashboard.paytm.com")')
     parser.add_argument('--match-type', choices=['exact', 'contains'], default='exact',
-                        help='Type of host matching to use (default: exact)')
+                        help='Type of matching to use (default: exact)')
     args = parser.parse_args()
     
     # If dashboard is requested, we need to save the results
@@ -44,152 +44,141 @@ async def main():
         # Initialize the session
         await session.initialize()
         
-        # List available tools
-        response = await session.list_tools()
-        print(f"Available tools: {[tool.name for tool in response.tools]}")
-        
-        # Execute the tool to parse Charles logs
-        if args.host:
-            # Filter by host
-            if needs_save:
-                result = await session.call_tool(
-                    "parse_and_save_charles_log_by_host",
-                    {
-                        "file_path": args.file_path,
-                        "host": args.host,
-                        "format_type": args.format,
-                        "output_dir": args.output_dir,
-                        "match_type": args.match_type
-                    }
-                )
-            else:
-                result = await session.call_tool(
-                    "parse_charles_log_by_host",
-                    {
-                        "file_path": args.file_path,
-                        "host": args.host,
-                        "format_type": args.format,
-                        "match_type": args.match_type
-                    }
-                )
-        else:
-            # Process all entries
-            if needs_save:
-                result = await session.call_tool(
-                    "parse_and_save_charles_log",
-                    {
-                        "file_path": args.file_path,
-                        "format_type": args.format,
-                        "output_dir": args.output_dir
-                    }
-                )
-            else:
-                result = await session.call_tool(
-                    "parse_charles_log",
-                    {
-                        "file_path": args.file_path,
-                        "format_type": args.format
-                    }
-                )
-        
-        # Print the result
-        print("Results:")
-        
         try:
-            # The MCP tool results might be in various formats depending on the version
-            # Try to extract the text content from the result
-            result_text = None
-            
-            # Check if content is directly available
-            if hasattr(result, 'content'):
-                content = result.content
-                # Handle TextContent objects which might be in a list
-                if isinstance(content, list) and len(content) > 0:
-                    if hasattr(content[0], 'text'):
-                        result_text = content[0].text
-                elif hasattr(content, 'text'):
-                    result_text = content.text
-                elif isinstance(content, (dict, str)):
-                    result_text = content
-            # Try alternative property names
-            elif hasattr(result, 'text'):
-                result_text = result.text
-                
-            # If we couldn't extract text, use the raw result
-            if result_text is None:
-                result_text = str(result)
-                
-            # Handle the text content
-            if isinstance(result_text, dict):
-                data = result_text
-            else:
-                # Try to parse as JSON
-                data = json.loads(result_text)
-            
-            if "error" in data:
-                print(f"Error: {data['error']}")
-            elif needs_save and "status" in data and data["status"] == "success":
-                print(f"Success: {data['message']}")
-                print(f"Output file: {data['output_file']}")
-                
-                if args.host:
-                    print(f"Filtered by host: {args.host}")
-                    print(f"Match type: {args.match_type}")
-                    print(f"Matching entries: {data.get('entry_count', 0)}")
-                
-                # If user wants to view the dashboard, call the dashboard tool
-                if args.dashboard and data['output_file'] and os.path.exists(data['output_file']):
-                    await view_dashboard(session, data['output_file'])
-            else:
-                if args.host:
-                    print(f"Filtered by host: {args.host}")
-                    print(f"Match type: {args.match_type}")
-                
-                if args.format == "summary":
-                    print(f"Total entries: {data.get('total_entries', 0)}")
-                    print(f"Request methods: {data.get('request_methods', {})}")
-                    print(f"Status codes: {data.get('status_codes', {})}")
-                    
-                    if not args.host:
-                        print(f"Top hosts: {dict(list(data.get('hosts', {}).items())[:5])}")
-                    
-                    timing = data.get('timing', {})
-                    print(f"Timing (ms): min={timing.get('min', 0):.2f}, " +
-                          f"max={timing.get('max', 0):.2f}, " +
-                          f"avg={timing.get('avg', 0):.2f}")
+            # If host is specified, use host-based filtering
+            if args.host:
+                # Get entries matching the host
+                if needs_save:
+                    result = await session.call_tool(
+                        "parse_and_save_charles_log_by_host",
+                        {
+                            "file_path": args.file_path,
+                            "host": args.host,
+                            "output_dir": args.output_dir,
+                            "format_type": args.format,
+                            "match_type": args.match_type
+                        }
+                    )
                 else:
-                    entry_count = len(data.get('entries', []))
-                    print(f"Processed {entry_count} entries")
-                    # Print the first entry as a sample
-                    if entry_count > 0:
-                        print("\nSample entry:")
-                        sample = data['entries'][0]
-                        print(f"URL: {sample.get('url', '')}")
-                        print(f"Method: {sample.get('method', '')}")
-                        print(f"Status: {sample.get('status', '')}")
-                        print(f"Duration: {sample.get('duration', 0)} ms")
-        except json.JSONDecodeError:
-            print(f"Raw response (not JSON): {result}")
+                    result = await session.call_tool(
+                        "parse_charles_log_by_host",
+                        {
+                            "file_path": args.file_path,
+                            "host": args.host,
+                            "format_type": args.format,
+                            "match_type": args.match_type
+                        }
+                    )
+                
+                # Print the result for matching host
+                if isinstance(result, dict):
+                    print("\nEntries matching host:", args.host)
+                    print(json.dumps(result, indent=2))
+                else:
+                    print("\nEntries matching host:", args.host)
+                    print(result)
+                
+                # Get entries not matching the host
+                if needs_save:
+                    result_exclude = await session.call_tool(
+                        "parse_and_save_charles_log_exclude_host",
+                        {
+                            "file_path": args.file_path,
+                            "host": args.host,
+                            "output_dir": args.output_dir,
+                            "format_type": args.format,
+                            "match_type": args.match_type
+                        }
+                    )
+                else:
+                    result_exclude = await session.call_tool(
+                        "parse_charles_log_by_host",
+                        {
+                            "file_path": args.file_path,
+                            "host": args.host,
+                            "format_type": args.format,
+                            "match_type": args.match_type
+                        }
+                    )
+                
+                # Print the result for non-matching host
+                if isinstance(result_exclude, dict):
+                    print("\nEntries not matching host:", args.host)
+                    print(json.dumps(result_exclude, indent=2))
+                else:
+                    print("\nEntries not matching host:", args.host)
+                    print(result_exclude)
+                
+                # Open dashboard if requested
+                if args.dashboard:
+                    if isinstance(result, dict) and "output_file" in result:
+                        print("\nOpening dashboard for matching entries...")
+                        dashboard_result = await session.call_tool(
+                            "view_charles_log_dashboard",
+                            {
+                                "file_path": result["output_file"]
+                            }
+                        )
+                        if isinstance(dashboard_result, dict):
+                            print(json.dumps(dashboard_result, indent=2))
+                        else:
+                            print(dashboard_result)
+                    
+                    if isinstance(result_exclude, dict) and "output_file" in result_exclude:
+                        print("\nOpening dashboard for non-matching entries...")
+                        dashboard_result = await session.call_tool(
+                            "view_charles_log_dashboard",
+                            {
+                                "file_path": result_exclude["output_file"]
+                            }
+                        )
+                        if isinstance(dashboard_result, dict):
+                            print(json.dumps(dashboard_result, indent=2))
+                        else:
+                            print(dashboard_result)
+            
+            # No filtering, process entire file
+            else:
+                if needs_save:
+                    result = await session.call_tool(
+                        "parse_and_save_charles_log",
+                        {
+                            "file_path": args.file_path,
+                            "output_dir": args.output_dir,
+                            "format_type": args.format
+                        }
+                    )
+                else:
+                    result = await session.call_tool(
+                        "parse_charles_log",
+                        {
+                            "file_path": args.file_path,
+                            "format_type": args.format
+                        }
+                    )
+                
+                # Print the result
+                if isinstance(result, dict):
+                    print(json.dumps(result, indent=2))
+                else:
+                    print(result)
+                
+                # Open dashboard if requested
+                if args.dashboard and isinstance(result, dict) and "output_file" in result:
+                    dashboard_result = await session.call_tool(
+                        "view_charles_log_dashboard",
+                        {
+                            "file_path": result["output_file"]
+                        }
+                    )
+                    if isinstance(dashboard_result, dict):
+                        print(json.dumps(dashboard_result, indent=2))
+                    else:
+                        print(dashboard_result)
+                
         except Exception as e:
-            print(f"Error processing result: {str(e)}")
-            print(f"Raw result: {result}")
-
-async def view_dashboard(session, file_path):
-    """Open a dashboard in the browser for the given JSON file"""
-    try:
-        dashboard_response = await session.call_tool(
-            "view_charles_log_dashboard",
-            {
-                "file_path": file_path
-            }
-        )
-        
-        if hasattr(dashboard_response, 'error') and dashboard_response.error:
-            print(f"Error opening dashboard: {dashboard_response.error}")
-        else:
-            print("Dashboard opened in browser")
-    except Exception as e:
-        print(f"Error opening dashboard: {str(e)}")
+            print(f"Error: {str(e)}", file=sys.stderr)
+            sys.exit(1)
 
 if __name__ == "__main__":
     asyncio.run(main()) 

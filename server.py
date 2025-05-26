@@ -43,15 +43,50 @@ def parse_charles_log(file_path: str, format_type: str = "summary") -> Dict:
     return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
 
 @mcp.tool()
+def parse_charles_log_by_path(file_path: str, path: str, format_type: str = "detailed", match_type: str = "exact") -> Dict:
+    """
+    Parse a Charles log file (.chls or .chlsj) and extract only entries for a specific :path.
+    
+    Args:
+        file_path: Path to the Charles log file
+        path: The :path to filter by (e.g., "/api/v2/fetch?param=value")
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of path matching to use ("exact" or "contains")
+        
+    Returns:
+        A dictionary containing the parsed log data for the specified path
+    """
+    # Validate file path
+    if not os.path.exists(file_path):
+        return {"error": f"File not found: {file_path}"}
+    
+    if not file_path.endswith(('.chls', '.chlsj')):
+        return {"error": "File must be a Charles log file (.chls or .chlsj)"}
+    
+    # Validate match_type
+    if match_type not in ["exact", "contains"]:
+        return {"error": f"Invalid match_type: {match_type}. Must be 'exact' or 'contains'"}
+    
+    # For .chlsj files (JSON format)
+    if file_path.endswith('.chlsj'):
+        try:
+            return _parse_chlsj_file_by_path(file_path, path, format_type, match_type)
+        except Exception as e:
+            return {"error": f"Error parsing .chlsj file: {str(e)}"}
+    
+    # For .chls files (binary format)
+    return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+@mcp.tool()
 def parse_charles_log_by_host(file_path: str, host: str, format_type: str = "detailed", match_type: str = "exact") -> Dict:
     """
     Parse a Charles log file (.chls or .chlsj) and extract only entries for a specific host.
     
     Args:
         file_path: Path to the Charles log file
-        host: The hostname to filter by (e.g., "dashboard.paytm.com")
+        host: The host to filter by (e.g., "paytm.com")
         format_type: Type of output format (summary, detailed, or raw)
-        match_type: Type of hostname matching to use ("exact" or "contains")
+        match_type: Type of host matching to use ("exact" or "contains")
         
     Returns:
         A dictionary containing the parsed log data for the specified host
@@ -130,16 +165,79 @@ def parse_and_save_charles_log(file_path: str, output_dir: str = "./output", for
     return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
 
 @mcp.tool()
+def parse_and_save_charles_log_by_path(file_path: str, path: str, output_dir: str = "./output", format_type: str = "detailed", match_type: str = "exact") -> Dict:
+    """
+    Parse a Charles log file (.chls or .chlsj) for a specific :path and save the result to the specified directory.
+    
+    Args:
+        file_path: Path to the Charles log file
+        path: The :path to filter by (e.g., "/api/v2/fetch?param=value")
+        output_dir: Directory to save the converted JSON file
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of path matching to use ("exact" or "contains")
+        
+    Returns:
+        A dictionary containing the result of the operation
+    """
+    # Validate file path
+    if not os.path.exists(file_path):
+        return {"error": f"File not found: {file_path}"}
+    
+    if not file_path.endswith(('.chls', '.chlsj')):
+        return {"error": "File must be a Charles log file (.chls or .chlsj)"}
+    
+    # Validate match_type
+    if match_type not in ["exact", "contains"]:
+        return {"error": f"Invalid match_type: {match_type}. Must be 'exact' or 'contains'"}
+    
+    # Validate output directory
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except Exception as e:
+            return {"error": f"Error creating output directory: {str(e)}"}
+    
+    # For .chlsj files (JSON format)
+    if file_path.endswith('.chlsj'):
+        try:
+            result = _parse_chlsj_file_by_path(file_path, path, format_type, match_type)
+            
+            # Generate output filename
+            base_name = os.path.basename(file_path)
+            name_without_ext = os.path.splitext(base_name)[0]
+            safe_path = path.replace("/", "_").replace("?", "_").replace("=", "_").replace("&", "_")
+            match_str = "exact" if match_type == "exact" else "contains"
+            output_file = os.path.join(output_dir, f"{name_without_ext}_{safe_path}_{match_str}_parsed.json")
+            
+            # Write to file
+            with open(output_file, 'w') as f:
+                json.dump(result, f, indent=2)
+            
+            return {
+                "status": "success",
+                "message": f"Successfully parsed and saved to {output_file}",
+                "output_file": output_file,
+                "filtered_by_path": path,
+                "match_type": match_type,
+                "entry_count": len(result.get("entries", [])) if "entries" in result else 0
+            }
+        except Exception as e:
+            return {"error": f"Error parsing or saving .chlsj file: {str(e)}"}
+    
+    # For .chls files (binary format)
+    return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+@mcp.tool()
 def parse_and_save_charles_log_by_host(file_path: str, host: str, output_dir: str = "./output", format_type: str = "detailed", match_type: str = "exact") -> Dict:
     """
     Parse a Charles log file (.chls or .chlsj) for a specific host and save the result to the specified directory.
     
     Args:
         file_path: Path to the Charles log file
-        host: The hostname to filter by (e.g., "dashboard.paytm.com")
+        host: The host to filter by (e.g., "paytm.com")
         output_dir: Directory to save the converted JSON file
         format_type: Type of output format (summary, detailed, or raw)
-        match_type: Type of hostname matching to use ("exact" or "contains")
+        match_type: Type of host matching to use ("exact" or "contains")
         
     Returns:
         A dictionary containing the result of the operation
@@ -191,6 +289,265 @@ def parse_and_save_charles_log_by_host(file_path: str, host: str, output_dir: st
     
     # For .chls files (binary format)
     return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+@mcp.tool()
+def parse_and_save_charles_log_exclude_host(file_path: str, host: str, output_dir: str = "./output", format_type: str = "detailed", match_type: str = "exact") -> Dict:
+    """
+    Parse a Charles log file (.chls or .chlsj) and save entries that don't match the specified host.
+    
+    Args:
+        file_path: Path to the Charles log file
+        host: The host to exclude (e.g., "paytm.com")
+        output_dir: Directory to save the converted JSON file
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of host matching to use ("exact" or "contains")
+        
+    Returns:
+        A dictionary containing the result of the operation
+    """
+    # Validate file path
+    if not os.path.exists(file_path):
+        return {"error": f"File not found: {file_path}"}
+    
+    if not file_path.endswith(('.chls', '.chlsj')):
+        return {"error": "File must be a Charles log file (.chls or .chlsj)"}
+    
+    # Validate match_type
+    if match_type not in ["exact", "contains"]:
+        return {"error": f"Invalid match_type: {match_type}. Must be 'exact' or 'contains'"}
+    
+    # Validate output directory
+    if not os.path.exists(output_dir):
+        try:
+            os.makedirs(output_dir)
+        except Exception as e:
+            return {"error": f"Error creating output directory: {str(e)}"}
+    
+    # For .chlsj files (JSON format)
+    if file_path.endswith('.chlsj'):
+        try:
+            # First try to parse the file as a whole JSON array
+            with open(file_path, 'r') as f:
+                content = f.read()
+                # Try to parse the file as a JSON array
+                all_entries = json.loads(content)
+                # If entries is not a list, wrap it in one
+                if not isinstance(all_entries, list):
+                    all_entries = [all_entries]
+        except json.JSONDecodeError:
+            # If it fails, fall back to line-by-line parsing
+            all_entries = []
+            with open(file_path, 'r') as f:
+                # .chlsj files may contain one JSON object per line
+                for line in f:
+                    try:
+                        if line.strip():  # Skip empty lines
+                            entry = json.loads(line.strip())
+                            all_entries.append(entry)
+                    except json.JSONDecodeError:
+                        continue  # Skip invalid lines
+        
+        # Filter entries that don't match the host and exclude .js, .svg, .png files
+        filtered_entries = []
+        for entry in all_entries:
+            entry_host = entry.get("host", "")
+            entry_path = entry.get("path", "")
+            
+            # Skip if path is None or contains .js, .svg, or .png
+            if entry_path is None or any(ext in entry_path.lower() for ext in [".js", ".svg", ".png"]):
+                continue
+            
+            # Skip if host is None
+            if entry_host is None:
+                continue
+            
+            # Include entries that don't match the host
+            if match_type == "exact":
+                # Exact match (case-insensitive)
+                if entry_host.lower() != host.lower():
+                    filtered_entries.append(entry)
+            else:  # "contains"
+                # Substring match (case-insensitive)
+                if host.lower() not in entry_host.lower():
+                    filtered_entries.append(entry)
+        
+        # Process entries based on format type
+        result = None
+        if format_type == "raw":
+            result = {"entries": filtered_entries, "excluded_host": host, "match_type": match_type}
+        elif format_type == "summary":
+            # Reuse the summary logic from _parse_chlsj_file_by_host
+            result = _process_entries_summary(filtered_entries, host, match_type, is_exclude=True)
+        else:
+            # Reuse the detailed logic from _parse_chlsj_file_by_host
+            result = _process_entries_detailed(filtered_entries, host, match_type, is_exclude=True)
+        
+        # Generate output filename
+        base_name = os.path.basename(file_path)
+        name_without_ext = os.path.splitext(base_name)[0]
+        safe_host = host.replace(".", "_").replace("/", "_").replace(":", "_")
+        match_str = "exact" if match_type == "exact" else "contains"
+        output_file = os.path.join(output_dir, f"{name_without_ext}_exclude_{safe_host}_{match_str}_parsed.json")
+        
+        # Write to file
+        with open(output_file, 'w') as f:
+            json.dump(result, f, indent=2)
+        
+        return {
+            "status": "success",
+            "message": f"Successfully parsed and saved to {output_file}",
+            "output_file": output_file,
+            "excluded_host": host,
+            "match_type": match_type,
+            "entry_count": len(filtered_entries)
+        }
+    
+    # For .chls files (binary format)
+    return {"error": "Binary .chls files are not supported yet, please export as .chlsj from Charles"}
+
+def _process_entries_summary(entries, host, match_type, is_exclude=False):
+    """Helper function to generate summary format for entries"""
+    summary = {
+        "total_entries": len(entries),
+        "excluded_host" if is_exclude else "filtered_by_host": host,
+        "match_type": match_type,
+        "request_methods": {},
+        "status_codes": {},
+        "content_types": {},
+        "timing": {
+            "min": float('inf'),
+            "max": 0,
+            "avg": 0,
+            "total": 0
+        }
+    }
+    
+    for entry in entries:
+        # Count request methods
+        method = entry.get("request", {}).get("method", "UNKNOWN")
+        summary["request_methods"][method] = summary["request_methods"].get(method, 0) + 1
+        
+        # Count status codes
+        status = entry.get("response", {}).get("status", 0)
+        status_str = str(status)
+        summary["status_codes"][status_str] = summary["status_codes"].get(status_str, 0) + 1
+        
+        # Count content types
+        content_type = None
+        response_headers = entry.get("response", {}).get("headers", {})
+        if isinstance(response_headers, dict):
+            content_type_values = response_headers.get("Content-Type", ["UNKNOWN"])
+            if isinstance(content_type_values, list) and len(content_type_values) > 0:
+                content_type = content_type_values[0]
+        elif isinstance(response_headers, list):
+            # Some Charles formats store headers as a list of objects with name/value
+            for header in response_headers:
+                if isinstance(header, dict) and header.get("name") == "Content-Type":
+                    content_type = header.get("value")
+                    break
+        
+        if content_type is None:
+            content_type = "UNKNOWN"
+            
+        summary["content_types"][content_type] = summary["content_types"].get(content_type, 0) + 1
+        
+        # Calculate timing stats
+        if "duration" in entry:
+            duration = entry["duration"]
+            summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+            summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+            summary["timing"]["total"] += duration
+        elif "durations" in entry and isinstance(entry["durations"], dict):
+            # Some Charles formats store duration in "durations.total"
+            duration = entry["durations"].get("total")
+            if duration is not None:
+                summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+                summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+                summary["timing"]["total"] += duration
+    
+    # Calculate average
+    if len(entries) > 0:
+        summary["timing"]["avg"] = summary["timing"]["total"] / len(entries)
+    
+    # If no entries, reset min to 0
+    if summary["timing"]["min"] == float('inf'):
+        summary["timing"]["min"] = 0
+        
+    return summary
+
+def _process_entries_detailed(entries, host, match_type, is_exclude=False):
+    """Helper function to generate detailed format for entries"""
+    processed_entries = []
+    
+    for entry in entries:
+        # Extract basic fields
+        processed_entry = {
+            "url": entry.get("url", ""),
+            "host": entry.get("host", ""),
+            "path": entry.get("path", ""),
+            "status": entry.get("status", ""),  # Some Charles formats use top-level status
+            "duration": 0,
+        }
+        
+        # Process request fields
+        if "request" in entry:
+            request = entry["request"]
+            processed_entry["method"] = request.get("method", "")
+            processed_entry["request_size"] = request.get("size", 0)
+            
+            # Process request headers
+            if "header" in request and "headers" in request["header"]:
+                # Some Charles formats nest headers under header.headers
+                processed_entry["request_headers"] = {}
+                for header in request["header"]["headers"]:
+                    if isinstance(header, dict) and "name" in header and "value" in header:
+                        processed_entry["request_headers"][header["name"]] = header["value"]
+            elif "headers" in request:
+                # Standard format
+                processed_entry["request_headers"] = request["headers"]
+            
+            # Add request body if available
+            if "body" in request:
+                processed_entry["request_body"] = request["body"]
+        
+        # Process response fields
+        if "response" in entry:
+            response = entry["response"]
+            if "status" in response:
+                processed_entry["status"] = response["status"]
+            processed_entry["response_size"] = response.get("size", 0)
+            
+            # Process response headers
+            if "header" in response and "headers" in response["header"]:
+                # Some Charles formats nest headers under header.headers
+                processed_entry["response_headers"] = {}
+                for header in response["header"]["headers"]:
+                    if isinstance(header, dict) and "name" in header and "value" in header:
+                        processed_entry["response_headers"][header["name"]] = header["value"]
+            elif "headers" in response:
+                # Standard format
+                processed_entry["response_headers"] = response["headers"]
+            
+            # Add response body if available
+            if "body" in response:
+                processed_entry["response_body"] = response["body"]
+        
+        # Handle different duration fields
+        if "duration" in entry:
+            processed_entry["duration"] = entry["duration"]
+        elif "durations" in entry and isinstance(entry["durations"], dict):
+            # Some Charles formats store duration in "durations.total"
+            total_duration = entry["durations"].get("total")
+            if total_duration is not None:
+                processed_entry["duration"] = total_duration
+        
+        processed_entries.append(processed_entry)
+    
+    return {
+        "entries": processed_entries,
+        "excluded_host" if is_exclude else "filtered_by_host": host,
+        "match_type": match_type
+    }
 
 @mcp.tool()
 def read_large_file_part(file_path: str, start_offset: int = 0, length: int = 1000000) -> Dict:
@@ -309,22 +666,30 @@ def _parse_chlsj_file(file_path: str, format_type: str) -> Dict:
         with open(file_path, 'r') as f:
             content = f.read()
             # Try to parse the file as a JSON array
-            entries = json.loads(content)
+            all_entries = json.loads(content)
             # If entries is not a list, wrap it in one
-            if not isinstance(entries, list):
-                entries = [entries]
+            if not isinstance(all_entries, list):
+                all_entries = [all_entries]
     except json.JSONDecodeError:
         # If it fails, fall back to line-by-line parsing
-        entries = []
+        all_entries = []
         with open(file_path, 'r') as f:
             # .chlsj files may contain one JSON object per line
             for line in f:
                 try:
                     if line.strip():  # Skip empty lines
                         entry = json.loads(line.strip())
-                        entries.append(entry)
+                        all_entries.append(entry)
                 except json.JSONDecodeError:
                     continue  # Skip invalid lines
+    
+    # Filter out entries with .js, .svg, or .png in the path
+    entries = []
+    for entry in all_entries:
+        path = entry.get("path", "")
+        # Skip if path is None or contains .js, .svg, or .png
+        if path is not None and not any(ext in path.lower() for ext in [".js", ".svg", ".png"]):
+            entries.append(entry)
     
     # Process based on format type
     if format_type == "raw":
@@ -472,15 +837,211 @@ def _parse_chlsj_file(file_path: str, format_type: str) -> Dict:
         
         return {"entries": processed_entries}
 
+def _parse_chlsj_file_by_path(file_path: str, path: str, format_type: str, match_type: str = "exact") -> Dict:
+    """
+    Parse a .chlsj file (Charles log in JSON format) and filter by path
+    
+    Args:
+        file_path: Path to the .chlsj file
+        path: Path to filter by
+        format_type: Type of output format (summary, detailed, or raw)
+        match_type: Type of path matching to use ("exact" or "contains")
+        
+    Returns:
+        Dictionary with parsed data for the specified path
+    """
+    # First try to parse the file as a whole JSON array
+    try:
+        with open(file_path, 'r') as f:
+            content = f.read()
+            # Try to parse the file as a JSON array
+            all_entries = json.loads(content)
+            # If entries is not a list, wrap it in one
+            if not isinstance(all_entries, list):
+                all_entries = [all_entries]
+    except json.JSONDecodeError:
+        # If it fails, fall back to line-by-line parsing
+        all_entries = []
+        with open(file_path, 'r') as f:
+            # .chlsj files may contain one JSON object per line
+            for line in f:
+                try:
+                    if line.strip():  # Skip empty lines
+                        entry = json.loads(line.strip())
+                        all_entries.append(entry)
+                except json.JSONDecodeError:
+                    continue  # Skip invalid lines
+    
+    # Filter entries by path based on match_type and exclude .js, .svg, .png files
+    filtered_entries = []
+    for entry in all_entries:
+        entry_path = entry.get("path", "")
+        
+        # Skip if path is None or contains .js, .svg, or .png
+        if entry_path is None or any(ext in entry_path.lower() for ext in [".js", ".svg", ".png"]):
+            continue
+        
+        # Apply filtering based on match type
+        if match_type == "exact":
+            # Exact match (case-insensitive)
+            if entry_path.lower() == path.lower():
+                filtered_entries.append(entry)
+        else:  # "contains"
+            # Substring match (case-insensitive)
+            if path.lower() in entry_path.lower():
+                filtered_entries.append(entry)
+    
+    # Process based on format type
+    if format_type == "raw":
+        return {"entries": filtered_entries, "filtered_by_path": path, "match_type": match_type}
+    
+    elif format_type == "summary":
+        summary = {
+            "total_entries": len(filtered_entries),
+            "filtered_by_path": path,
+            "request_methods": {},
+            "status_codes": {},
+            "content_types": {},
+            "timing": {
+                "min": float('inf'),
+                "max": 0,
+                "avg": 0,
+                "total": 0
+            }
+        }
+        
+        for entry in filtered_entries:
+            # Count request methods
+            method = entry.get("request", {}).get("method", "UNKNOWN")
+            summary["request_methods"][method] = summary["request_methods"].get(method, 0) + 1
+            
+            # Count status codes
+            status = entry.get("response", {}).get("status", 0)
+            status_str = str(status)
+            summary["status_codes"][status_str] = summary["status_codes"].get(status_str, 0) + 1
+            
+            # Count content types
+            content_type = None
+            response_headers = entry.get("response", {}).get("headers", {})
+            if isinstance(response_headers, dict):
+                content_type_values = response_headers.get("Content-Type", ["UNKNOWN"])
+                if isinstance(content_type_values, list) and len(content_type_values) > 0:
+                    content_type = content_type_values[0]
+            elif isinstance(response_headers, list):
+                # Some Charles formats store headers as a list of objects with name/value
+                for header in response_headers:
+                    if isinstance(header, dict) and header.get("name") == "Content-Type":
+                        content_type = header.get("value")
+                        break
+            
+            if content_type is None:
+                content_type = "UNKNOWN"
+                
+            summary["content_types"][content_type] = summary["content_types"].get(content_type, 0) + 1
+            
+            # Calculate timing stats
+            if "duration" in entry:
+                duration = entry["duration"]
+                summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+                summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+                summary["timing"]["total"] += duration
+            elif "durations" in entry and isinstance(entry["durations"], dict):
+                # Some Charles formats store duration in "durations.total"
+                duration = entry["durations"].get("total")
+                if duration is not None:
+                    summary["timing"]["min"] = min(summary["timing"]["min"], duration)
+                    summary["timing"]["max"] = max(summary["timing"]["max"], duration)
+                    summary["timing"]["total"] += duration
+        
+        # Calculate average
+        if len(filtered_entries) > 0:
+            summary["timing"]["avg"] = summary["timing"]["total"] / len(filtered_entries)
+        
+        # If no entries, reset min to 0
+        if summary["timing"]["min"] == float('inf'):
+            summary["timing"]["min"] = 0
+            
+        return summary
+    
+    # Detailed format (default)
+    else:
+        processed_entries = []
+        
+        for entry in filtered_entries:
+            # Extract basic fields
+            processed_entry = {
+                "url": entry.get("url", ""),
+                "host": entry.get("host", ""),
+                "path": entry.get("path", ""),
+                "status": entry.get("status", ""),  # Some Charles formats use top-level status
+                "duration": 0,
+            }
+            
+            # Process request fields
+            if "request" in entry:
+                request = entry["request"]
+                processed_entry["method"] = request.get("method", "")
+                processed_entry["request_size"] = request.get("size", 0)
+                
+                # Process request headers
+                if "header" in request and "headers" in request["header"]:
+                    # Some Charles formats nest headers under header.headers
+                    processed_entry["request_headers"] = {}
+                    for header in request["header"]["headers"]:
+                        if isinstance(header, dict) and "name" in header and "value" in header:
+                            processed_entry["request_headers"][header["name"]] = header["value"]
+                elif "headers" in request:
+                    # Standard format
+                    processed_entry["request_headers"] = request["headers"]
+                
+                # Add request body if available
+                if "body" in request:
+                    processed_entry["request_body"] = request["body"]
+            
+            # Process response fields
+            if "response" in entry:
+                response = entry["response"]
+                if "status" in response:
+                    processed_entry["status"] = response["status"]
+                processed_entry["response_size"] = response.get("size", 0)
+                
+                # Process response headers
+                if "header" in response and "headers" in response["header"]:
+                    # Some Charles formats nest headers under header.headers
+                    processed_entry["response_headers"] = {}
+                    for header in response["header"]["headers"]:
+                        if isinstance(header, dict) and "name" in header and "value" in header:
+                            processed_entry["response_headers"][header["name"]] = header["value"]
+                elif "headers" in response:
+                    # Standard format
+                    processed_entry["response_headers"] = response["headers"]
+                
+                # Add response body if available
+                if "body" in response:
+                    processed_entry["response_body"] = response["body"]
+            
+            # Handle different duration fields
+            if "duration" in entry:
+                processed_entry["duration"] = entry["duration"]
+            elif "durations" in entry and isinstance(entry["durations"], dict):
+                # Some Charles formats store duration in "durations.total"
+                total_duration = entry["durations"].get("total")
+                if total_duration is not None:
+                    processed_entry["duration"] = total_duration
+            
+            processed_entries.append(processed_entry)
+        
+        return {"entries": processed_entries, "filtered_by_path": path, "match_type": match_type}
+
 def _parse_chlsj_file_by_host(file_path: str, host: str, format_type: str, match_type: str = "exact") -> Dict:
     """
     Parse a .chlsj file (Charles log in JSON format) and filter by host
     
     Args:
         file_path: Path to the .chlsj file
-        host: Hostname to filter by
+        host: Host to filter by
         format_type: Type of output format (summary, detailed, or raw)
-        match_type: Type of hostname matching to use ("exact" or "contains")
+        match_type: Type of host matching to use ("exact" or "contains")
         
     Returns:
         Dictionary with parsed data for the specified host
@@ -490,27 +1051,36 @@ def _parse_chlsj_file_by_host(file_path: str, host: str, format_type: str, match
         with open(file_path, 'r') as f:
             content = f.read()
             # Try to parse the file as a JSON array
-            entries = json.loads(content)
+            all_entries = json.loads(content)
             # If entries is not a list, wrap it in one
-            if not isinstance(entries, list):
-                entries = [entries]
+            if not isinstance(all_entries, list):
+                all_entries = [all_entries]
     except json.JSONDecodeError:
         # If it fails, fall back to line-by-line parsing
-        entries = []
+        all_entries = []
         with open(file_path, 'r') as f:
             # .chlsj files may contain one JSON object per line
             for line in f:
                 try:
                     if line.strip():  # Skip empty lines
                         entry = json.loads(line.strip())
-                        entries.append(entry)
+                        all_entries.append(entry)
                 except json.JSONDecodeError:
                     continue  # Skip invalid lines
     
-    # Filter entries by host based on match_type
+    # Filter entries by host based on match_type and exclude .js, .svg, .png files
     filtered_entries = []
-    for entry in entries:
+    for entry in all_entries:
         entry_host = entry.get("host", "")
+        entry_path = entry.get("path", "")
+        
+        # Skip if path is None or contains .js, .svg, or .png
+        if entry_path is None or any(ext in entry_path.lower() for ext in [".js", ".svg", ".png"]):
+            continue
+        
+        # Skip if host is None
+        if entry_host is None:
+            continue
         
         # Apply filtering based on match type
         if match_type == "exact":
@@ -529,7 +1099,7 @@ def _parse_chlsj_file_by_host(file_path: str, host: str, format_type: str, match
     elif format_type == "summary":
         summary = {
             "total_entries": len(filtered_entries),
-            "host": host,
+            "filtered_by_host": host,
             "request_methods": {},
             "status_codes": {},
             "content_types": {},
@@ -808,52 +1378,155 @@ def _map_endpoints_across_files(files_data: List[Dict], file_names: List[str]) -
     for idx, data in enumerate(files_data):
         file_name = file_names[idx]
         
-        # Handle the case where entries are in the 'data' field
-        entries = data.get('data', [])
+        # Handle both 'data' and 'entries' fields
+        entries = data.get('data', data.get('entries', []))
         if not entries:
             continue
         
         # Process each entry
         for entry_idx, entry in enumerate(entries):
-            # Create a unique key for this API endpoint
-            method = entry.get("method", "UNKNOWN")
-            host = entry.get("host", "UNKNOWN")
-            path = entry.get("path", "UNKNOWN")
-            endpoint_key = f"{method}:{host}{path}"
+            # Create a unique key for this API endpoint using :path as primary key
+            method = entry.get("method", entry.get("request", {}).get("method", "UNKNOWN"))
+            full_path = entry.get(":path")  # Get the :path field
+            
+            # If :path is not available, construct it from path and query parameters
+            if not full_path:
+                path = entry.get("path", "UNKNOWN")
+                query = ""
+                # Try to get query parameters from different possible locations
+                if "request" in entry:
+                    request = entry["request"]
+                    if "query" in request:
+                        query = "?" + request["query"] if request["query"] else ""
+                    elif "queryString" in request:
+                        query = "?" + request["queryString"] if request["queryString"] else ""
+                full_path = path + query
+            
+            # Use :path as the primary key, with method as secondary key
+            endpoint_key = f"{method}:{full_path}"
             
             # Initialize endpoint data if not seen before
             if endpoint_key not in endpoint_mapping:
                 endpoint_mapping[endpoint_key] = {
                     "method": method,
-                    "host": host,
-                    "path": path,
-                    "occurrences": {}
+                    "path": full_path,  # Store the full path including query parameters
+                    "has_changes": False,
+                    "present_in": [],
+                    "missing_in": [],
+                    "instance_counts": {},
+                    "differences": {
+                        "request": {},
+                        "response": {},
+                        "headers": {},
+                        "status_codes": {},
+                        "parameters": {}
+                    }
                 }
             
+            # Update presence information
+            if file_name not in endpoint_mapping[endpoint_key]["present_in"]:
+                endpoint_mapping[endpoint_key]["present_in"].append(file_name)
+            
             # Store this occurrence with instance index
-            if file_name not in endpoint_mapping[endpoint_key]["occurrences"]:
-                endpoint_mapping[endpoint_key]["occurrences"][file_name] = []
+            if file_name not in endpoint_mapping[endpoint_key]["instance_counts"]:
+                endpoint_mapping[endpoint_key]["instance_counts"][file_name] = 0
+            endpoint_mapping[endpoint_key]["instance_counts"][file_name] += 1
             
             # Store complete instance data
             instance_data = {
                 "index": entry_idx,
-                "status": entry.get("status"),
+                "status": entry.get("status", entry.get("response", {}).get("status")),
                 "timestamp": entry.get("timestamp"),
                 "request": {
-                    "headers": entry.get("request", {}).get("headers", {}),
-                    "body": entry.get("request", {}).get("body"),  # Store body even if None
-                    "cookies": entry.get("request", {}).get("cookies", []),
-                    "query_params": entry.get("request", {}).get("query_params", [])
+                    "headers": entry.get("request_headers", entry.get("request", {}).get("headers", {})),
+                    "body": entry.get("request_body", entry.get("request", {}).get("body")),
+                    "cookies": entry.get("request_cookies", entry.get("request", {}).get("cookies", [])),
+                    "query_params": entry.get("request_query_params", entry.get("request", {}).get("query_params", []))
                 },
                 "response": {
-                    "headers": entry.get("response", {}).get("headers", {}),
-                    "body": entry.get("response", {}).get("body"),  # Store body even if None
-                    "cookies": entry.get("response", {}).get("cookies", [])
+                    "headers": entry.get("response_headers", entry.get("response", {}).get("headers", {})),
+                    "body": entry.get("response_body", entry.get("response", {}).get("body")),
+                    "cookies": entry.get("response_cookies", entry.get("response", {}).get("cookies", []))
                 }
             }
-            endpoint_mapping[endpoint_key]["occurrences"][file_name].append(instance_data)
+            
+            # Compare with previous instances if they exist
+            for other_file in endpoint_mapping[endpoint_key]["present_in"]:
+                if other_file != file_name:
+                    comparison_key = f"{file_name}_vs_{other_file}"
+                    if comparison_key not in endpoint_mapping[endpoint_key]["differences"]:
+                        endpoint_mapping[endpoint_key]["differences"][comparison_key] = {}
+                    
+                    # Compare request/response data
+                    endpoint_mapping[endpoint_key]["differences"][comparison_key] = {
+                        "instance_details": {
+                            file_name: {
+                                "available": True,
+                                "index": instance_data["index"],
+                                "timestamp": instance_data["timestamp"]
+                            }
+                        }
+                    }
+                    
+                    # Compare status codes
+                    if instance_data["status"] is not None:
+                        endpoint_mapping[endpoint_key]["differences"][comparison_key]["status_difference"] = {
+                            file_name: instance_data["status"]
+                        }
+                    
+                    # Compare request/response data
+                    _compare_request_response(
+                        instance_data["request"],
+                        instance_data["response"],
+                        file_name,
+                        endpoint_mapping[endpoint_key]["differences"][comparison_key]
+                    )
     
     return endpoint_mapping
+
+def _compare_request_response(request: Dict, response: Dict, file_name: str, result_container: Dict) -> None:
+    """
+    Compare request and response data between two API calls.
+    
+    Args:
+        request: Request data from current file
+        response: Response data from current file
+        file_name: Name of the current file
+        result_container: Dictionary to store comparison results
+    """
+    # Compare request data
+    if request:
+        if "request_differences" not in result_container:
+            result_container["request_differences"] = {}
+        result_container["request_differences"][file_name] = request
+
+    # Compare response data
+    if response:
+        if "response_differences" not in result_container:
+            result_container["response_differences"] = {}
+        result_container["response_differences"][file_name] = response
+        
+        # Extract and store response status and message
+        if response.get("body"):
+            try:
+                if isinstance(response["body"], str):
+                    body = json.loads(response["body"])
+                else:
+                    body = response["body"]
+                    
+                if isinstance(body, dict):
+                    status = body.get("status") or body.get("statusCode") or body.get("code")
+                    message = body.get("message") or body.get("statusMessage")
+                    
+                    if status or message:
+                        if "response_status_summary" not in result_container:
+                            result_container["response_status_summary"] = {}
+                        result_container["response_status_summary"][file_name] = {
+                            "status": status,
+                            "message": message
+                        }
+            except:
+                pass
 
 def _compare_parameters(param1, param2, file1: str, file2: str, path: List[str] = None) -> Dict:
     """
@@ -979,124 +1652,70 @@ def _analyze_api_differences(endpoint_mapping: Dict, comparison_level: str) -> D
     comparison_results = {}
     
     for endpoint_key, endpoint_data in endpoint_mapping.items():
-        occurrences = endpoint_data["occurrences"]
-        file_names = list(occurrences.keys())
+        # Skip endpoints that are only present in one file
+        if len(endpoint_data["present_in"]) < 2:
+            continue
+            
+        file_names = endpoint_data["present_in"]
         
         # Initialize result structure
         result = {
             "method": endpoint_data["method"],
-            "host": endpoint_data["host"],
             "path": endpoint_data["path"],
             "has_changes": False,
             "present_in": file_names,
-            "missing_in": [],
-            "instance_counts": {},
-            "differences": {
-                "request": {},
-                "response": {},
-                "headers": {},
-                "status_codes": {},
-                "parameters": {}
-            }
+            "missing_in": endpoint_data["missing_in"],
+            "instance_counts": endpoint_data["instance_counts"],
+            "differences": endpoint_data["differences"],
+            "response_status_summary": {},
+            "response_body_differences": {}
         }
         
-        # Record instance counts for each file
-        for file_name in file_names:
-            instances = occurrences[file_name]
-            result["instance_counts"][file_name] = len(instances)
+        # Extract and summarize response differences
+        for comparison_key, comparison_data in endpoint_data["differences"].items():
+            if "response_differences" in comparison_data:
+                for file_name, response_data in comparison_data["response_differences"].items():
+                    body = response_data.get("body", {})
+                    if isinstance(body, dict) and body.get("text"):
+                        try:
+                            parsed_body = json.loads(body["text"])
+                            if isinstance(parsed_body, dict):
+                                # Store response status
+                                status_code = parsed_body.get("statusCode") or parsed_body.get("code")
+                                status_message = parsed_body.get("statusMessage") or parsed_body.get("message")
+                                if status_code or status_message:
+                                    result["response_status_summary"][file_name] = {
+                                        "code": status_code,
+                                        "message": status_message
+                                    }
+                                
+                                # Store response body differences
+                                if "response_body_differences" not in result:
+                                    result["response_body_differences"] = {}
+                                result["response_body_differences"][file_name] = parsed_body
+                                
+                                # Compare response bodies between files
+                                for other_file in file_names:
+                                    if other_file != file_name:
+                                        comparison_key = f"{file_name}_vs_{other_file}"
+                                        if comparison_key not in result["response_body_differences"]:
+                                            result["response_body_differences"][comparison_key] = {}
+                                            
+                                        # Deep compare response structures
+                                        if other_file in result["response_body_differences"]:
+                                            other_body = result["response_body_differences"][other_file]
+                                            differences = _deep_compare_structures(parsed_body, other_body, [], include_values=True)
+                                            if differences:
+                                                result["response_body_differences"][comparison_key]["differences"] = differences
+                                                result["has_changes"] = True
+                        except:
+                            pass
         
-        # Compare across file pairs
-        for i in range(len(file_names)):
-            for j in range(i + 1, len(file_names)):
-                file1 = file_names[i]
-                file2 = file_names[j]
-                
-                instances1 = occurrences[file1]
-                instances2 = occurrences[file2]
-                
-                # Compare each instance pair
-                max_instances = max(len(instances1), len(instances2))
-                for instance_idx in range(max_instances):
-                    comparison_key = f"{file1}_vs_{file2}_instance_{instance_idx + 1}"
-                    
-                    # Get instances if available
-                    inst1 = instances1[instance_idx] if instance_idx < len(instances1) else None
-                    inst2 = instances2[instance_idx] if instance_idx < len(instances2) else None
-                    
-                    # Log instance details
-                    result["differences"][comparison_key] = {
-                        "instance_details": {
-                            file1: {
-                                "available": inst1 is not None,
-                                "index": inst1["index"] if inst1 else None,
-                                "timestamp": inst1["timestamp"] if inst1 else None
-                            },
-                            file2: {
-                                "available": inst2 is not None,
-                                "index": inst2["index"] if inst2 else None,
-                                "timestamp": inst2["timestamp"] if inst2 else None
-                            }
-                        }
-                    }
-                    
-                    # Skip if either instance is missing
-                    if not inst1 or not inst2:
-                        result["has_changes"] = True
-                        result["differences"][comparison_key]["missing_instance"] = {
-                            "detail": f"Instance {instance_idx + 1} missing in {'first' if not inst1 else 'second'} file"
-                        }
-                        continue
-                    
-                    # Compare request parameters
-                    param_diff = _compare_parameters(
-                        inst1["request"],
-                        inst2["request"],
-                        file1, file2,
-                        ["request"]
-                    )
-                    if param_diff:
-                        result["has_changes"] = True
-                        result["differences"][comparison_key]["request_differences"] = param_diff
-                    
-                    # Compare response parameters
-                    param_diff = _compare_parameters(
-                        inst1["response"],
-                        inst2["response"],
-                        file1, file2,
-                        ["response"]
-                    )
-                    if param_diff:
-                        result["has_changes"] = True
-                        result["differences"][comparison_key]["response_differences"] = param_diff
-                    
-                    # Compare status codes
-                    if inst1["status"] != inst2["status"]:
-                        result["has_changes"] = True
-                        result["differences"][comparison_key]["status_difference"] = {
-                            file1: inst1["status"],
-                            file2: inst2["status"]
-                        }
-                    
-                    # Compare headers
-                    _compare_headers(
-                        inst1["request"]["headers"],
-                        inst2["request"]["headers"],
-                        file1, file2,
-                        "request",
-                        result["differences"][comparison_key]
-                    )
-                    
-                    _compare_headers(
-                        inst1["response"]["headers"],
-                        inst2["response"]["headers"],
-                        file1, file2,
-                        "response",
-                        result["differences"][comparison_key]
-                    )
-                    
-                    # If no differences were found for this instance comparison, note that
-                    if len(result["differences"][comparison_key]) == 1:  # Only has instance_details
-                        result["differences"][comparison_key]["note"] = "No differences found for this instance pair"
+        # Check if there are any differences
+        for comparison_key, comparison_data in endpoint_data["differences"].items():
+            if comparison_data:
+                result["has_changes"] = True
+                break
         
         # Add this endpoint's comparison results
         comparison_results[endpoint_key] = result
