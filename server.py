@@ -270,7 +270,7 @@ def parse_and_save_charles_log_by_host(file_path: str, host: str, output_dir: st
             name_without_ext = os.path.splitext(base_name)[0]
             safe_host = host.replace(".", "_").replace("/", "_").replace(":", "_")
             match_str = "exact" if match_type == "exact" else "contains"
-            output_file = os.path.join(output_dir, f"{name_without_ext}_{safe_host}_{match_str}_parsed.json")
+            output_file = os.path.join(output_dir, f"{name_without_ext}_{safe_host}_{match_str}.json")
             
             # Write to file
             with open(output_file, 'w') as f:
@@ -683,9 +683,27 @@ def _parse_chlsj_file(file_path: str, format_type: str) -> Dict:
                 except json.JSONDecodeError:
                     continue  # Skip invalid lines
     
+    # Remove duplicates based on :path while keeping the first occurrence
+    seen_paths = {}
+    unique_entries = []
+    for entry in all_entries:
+        path = entry.get(":path")
+        if not path:  # If :path is not available, construct it from path and query parameters
+            path = entry.get("path", "UNKNOWN")
+            if "request" in entry:
+                request = entry["request"]
+                if "query" in request:
+                    path += "?" + request["query"] if request["query"] else ""
+                elif "queryString" in request:
+                    path += "?" + request["queryString"] if request["queryString"] else ""
+        
+        if path not in seen_paths:
+            seen_paths[path] = True
+            unique_entries.append(entry)
+    
     # Filter out entries with .js, .svg, or .png in the path
     entries = []
-    for entry in all_entries:
+    for entry in unique_entries:
         path = entry.get("path", "")
         # Skip if path is None or contains .js, .svg, or .png
         if path is not None and not any(ext in path.lower() for ext in [".js", ".svg", ".png"]):
